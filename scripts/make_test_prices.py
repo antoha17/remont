@@ -51,3 +51,13 @@ for room, rows, disc in [
     ws.append([None, None, "Составлено:", None, "Согласовано:"])
 h = wb.create_sheet("Прайс для расчета"); h.sheet_state = "hidden"; h.append(["Наименование", "ед. изм.", "кол-во", "цена"]); h.append(["Работа из прайса", "м2", 1, 999])
 out3 = os.path.join(os.path.dirname(out) or ".", "works_flag.xlsx"); wb.save(out3); print(out3)
+
+# Смета материалов в формате компании (выдуманная): колонка A = 1 у выбранных позиций, итоги считаются только по ним
+wb = Workbook(); ws = wb.active; ws.title = "Печать"
+ws.append([None, None, "Адрес объекта :"]); ws.append([None, None, "Итого по смете:", None, 2 * 590 + 3 * 3100])
+ws.append([None, "ID", None, "Товары (работы, услуги)", "ед. изм.", "кол-во", "цена", "сумма", "вес за ед кг.", "итого вес кг."])
+ws.append([0, None, None, "СУХИЕ СМЕСИ", "ед. изм.", "кол-во", "цена", "сумма", "вес за ед кг.", "Итого вес кг."])
+for f, i, n, u, q, p, w in [(1, 101, "Штукатурка гипсовая 30 кг", "шт", 2, 590, 30), (0, 102, "Наливной пол 20 кг", "шт", 1, 480, 20), (1, 103, "Краска интерьерная 10 л", "шт", 3, 3100, 14)]:
+    ws.append([f, i, None, n, u, q, p, q * p, w, q * w])
+ws.append([1, None, None, "Итого по разделу (СУХИЕ СМЕСИ)", None, None, None, 2 * 590 + 3 * 3100])
+out4 = os.path.join(os.path.dirname(out) or ".", "mats_flag.xlsx"); wb.save(out4); print(out4)

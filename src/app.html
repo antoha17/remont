@@ -129,7 +129,7 @@ tr.under td{background:#eef8f2}
     <div>
       <div class="row" style="justify-content:space-between;margin-bottom:6px">
         <h2 style="margin:0">Комнаты</h2>
-        <span class="row"><button class="small" id="btnRecognize" title="ИИ построит комнаты по схеме из PDF или фото">📄 План из PDF/фото</button><button class="primary small" id="btnAddRoom">+ Комната</button></span>
+        <span class="row"><button class="small" id="btnRoomsEst" title="Построить комнаты по размерам из сметы работ (L, B, H)">📋 Комнаты из сметы</button><button class="small" id="btnRecognize" title="ИИ построит комнаты по схеме из PDF или фото">📄 План из PDF/фото</button><button class="primary small" id="btnAddRoom">+ Комната</button></span>
       </div>
       <div id="recReport"></div>
       <div class="roomlist" id="roomList"></div>
@@ -137,7 +137,7 @@ tr.under td{background:#eef8f2}
     </div>
     <div class="viewcol">
       <div class="viewbar">
-        <div class="seg"><button data-mode="2d" class="on">План сверху</button><button data-mode="3d">3D</button></div>
+        <div class="seg"><button data-mode="2d" class="on">План сверху</button><button data-mode="3d">3D</button><button data-mode="proj" title="Проект (PDF) — посмотреть, что где">Проект</button></div>
         <div class="seg"><button data-scope="all" class="on">Весь объект</button><button data-scope="one">Только комната</button></div>
         <label class="row" id="lowWallsWrap" style="gap:4px;display:none"><input type="checkbox" id="lowWalls"> низкие стены</label>
       </div>
@@ -148,30 +148,42 @@ tr.under td{background:#eef8f2}
 </section>
 
 <section class="page" id="pageEst">
-  <div class="row noprint" style="justify-content:space-between;margin-bottom:8px">
-    <h2 style="margin:0">Смета по объекту</h2>
-    <div class="row">
-      <button class="primary" id="btnSuggest" title="ИИ предложит материалы из вашей базы для каждой комнаты">🤖 Подобрать материалы ИИ</button>
-      <button id="btnRefreshPrices" title="Подставить цены из загруженной базы">Обновить цены по базе</button>
-      <button id="btnExport">Скачать смету в Excel</button>
-      <button id="btnPrint">Печать</button>
+  <div class="muted noprint" style="margin-bottom:10px">Основа расчёта — исходная смета (материалы и работы), которую компания согласовала с заказчиком. Свой расчёт по комнатам внизу — для проверки.</div>
+  <div class="row" style="justify-content:space-between;margin-bottom:8px">
+    <h2 style="margin:0">Материалы — исходная смета</h2>
+    <div class="row noprint">
+      <button class="primary" id="btnMatsLoad">📷 Загрузить смету материалов (Excel / PDF / фото)…</button>
+      <button id="btnMatsAdd">+ Строка</button>
+      <button class="danger" id="btnMatsClear">Очистить</button>
+      <input type="file" id="fileMats" accept="application/pdf,image/*,.xlsx,.xls,.xlsm,.csv" multiple hidden>
     </div>
   </div>
-  <div class="muted noprint" style="margin-bottom:10px">Материал добавляется в комнату из базы. Количество считается само: <b>основа</b> (например, площадь пола) × <b>расход на 1 ед.</b> + <b>запас %</b>, затем делится на <b>фасовку</b> и округляется вверх.</div>
-  <h2 style="margin:6px 0 8px">Материалы</h2>
-  <div id="estimate"></div>
+  <div id="matsMsg"></div>
+  <div id="mats"></div>
   <div class="row" style="justify-content:space-between;margin:22px 0 8px;border-top:2px solid var(--line);padding-top:14px">
-    <h2 style="margin:0">Работы — согласованная смета</h2>
+    <h2 style="margin:0">Работы — исходная смета</h2>
     <div class="row noprint">
-      <button class="primary" id="btnWorksLoad">📷 Загрузить смету работ (PDF / фото / Excel)…</button>
+      <button class="primary" id="btnWorksLoad">📷 Загрузить смету работ (Excel / PDF / фото)…</button>
       <button id="btnWorksAdd">+ Строка</button>
       <button class="danger" id="btnWorksClear">Очистить</button>
       <input type="file" id="fileWorks" accept="application/pdf,image/*,.xlsx,.xls,.xlsm,.csv" multiple hidden>
     </div>
   </div>
-  <div class="muted noprint" style="margin-bottom:8px">Смета, которую компания составила и согласовала с заказчиком. Excel читается сразу, PDF и фото — с помощью ИИ. Потом по ней сверяется акт (вкладка 4).</div>
+  <div class="muted noprint" style="margin-bottom:8px">Excel читается сразу, PDF и фото — с помощью ИИ. По этой смете сверяется акт (вкладка 4). Если в смете есть размеры помещений — по ним строятся комнаты.</div>
   <div id="worksMsg"></div>
   <div id="works"></div>
+  <div id="estTotal" style="margin-top:14px"></div>
+  <details id="ownCalc" style="margin-top:22px;border-top:2px solid var(--line);padding-top:14px">
+    <summary style="cursor:pointer"><b style="font-size:16px">Проверка: свой расчёт материалов по комнатам</b> <span class="muted">— посчитать количество по замерам и сравнить со сметой</span></summary>
+    <div class="row noprint" style="justify-content:flex-end;margin:8px 0">
+      <button class="primary" id="btnSuggest" title="ИИ предложит материалы из вашей базы для каждой комнаты">🤖 Подобрать материалы ИИ</button>
+      <button id="btnRefreshPrices" title="Подставить цены из загруженной базы">Обновить цены по базе</button>
+      <button id="btnExport">Скачать расчёт в Excel</button>
+      <button id="btnPrint">Печать</button>
+    </div>
+    <div class="muted noprint" style="margin-bottom:10px">Материал добавляется в комнату из базы. Количество считается само: <b>основа</b> (например, площадь пола) × <b>расход на 1 ед.</b> + <b>запас %</b>, затем делится на <b>фасовку</b> и округляется вверх.</div>
+    <div id="estimate"></div>
+  </details>
 </section>
 
 <section class="page" id="pageDB">
@@ -338,8 +350,8 @@ function bbox(r){ const p = points(r); const xs = p.map(q => q[0]), ys = p.map(q
 
 function metrics(r){
   const p = points(r), S = segs(r), h = num(r.h);
-  const area = polyArea(p), perim = S.reduce((a, s) => a + s.len, 0);
-  let openArea = 0, doorW = 0, slopesWin = 0, slopesDoor = 0, windows = 0, doors = 0;
+  const area = Math.max(0, polyArea(p) + num(r.floorAdj)), perim = S.reduce((a, s) => a + s.len, 0); // floorAdj — поправка площади пола (как в смете)
+  let openArea = num(r.openArea), doorW = 0, slopesWin = 0, slopesDoor = 0, windows = 0, doors = 0;
   for (const o of r.openings) {
     const w = num(o.w), oh = num(o.h);
     openArea += w * oh;
@@ -410,7 +422,7 @@ document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => {
 $("#pname").oninput = e => { P.name = e.target.value; save(); };
 $("#btnNew").onclick = () => {
   if (P.rooms.length && !confirm("Начать новый объект? Текущий лучше сначала сохранить в файл.")) return;
-  P = newProject(); sel = null; save(); renderAll();
+  P = newProject(); sel = null; save(); clearProject(); renderAll();
 };
 $("#btnSave").onclick = () => {
   const name = (P.name || "объект").replace(/[\\/:*?"<>|]+/g, "_").slice(0, 80);
@@ -450,6 +462,8 @@ function renderEditor(){
     <div class="fields">
       <label>Название</label><input data-f="name" value="${esc(r.name)}">
       <label>Высота потолка, м</label><input class="num" data-f="h" value="${r.h}" inputmode="decimal">
+      <label title="Если размеры дверей и окон не известны — общая площадь проёмов (как в смете)">Проёмы общей площадью, м²</label><input class="num" data-f="openArea" value="${esc(r.openArea || "")}" placeholder="0" inputmode="decimal">
+      <label title="Колонны, короба, шахты — вычитаются из площади пола (как в смете)">Поправка площади пола, м²</label><input class="num" data-f="floorAdj" value="${esc(r.floorAdj || "")}" placeholder="0" inputmode="decimal">
       <label>Форма</label>
       <select data-f="shape"><option value="rect" ${r.shape==="rect"?"selected":""}>Прямоугольник</option><option value="poly" ${r.shape==="poly"?"selected":""}>Сложная (по стенам)</option></select>
       ${r.shape === "rect" ? `
@@ -484,6 +498,14 @@ function renderEditor(){
   <div class="row"><button class="small" id="dupRoom">Копировать комнату</button><button class="small danger" id="delRoom">Удалить комнату</button></div>`;
   renderMetrics();
 }
+/* Сверка с размерами из сметы работ (если в смете есть помещение с таким же названием) */
+function estCompare(r, m){
+  const dims = (P.works && P.works.roomDims) || [], d = dims.find(x => norm(x.name) === norm(r.name)); if (!d) return "";
+  const row = (t, est, own) => { if (est == null) return ""; const bad = Math.abs(num(est) - own) > Math.max(0.05, num(est) * 0.01);
+    return `<span>${t}</span><b class="${bad ? "warn" : ""}" style="${bad ? "" : "color:var(--ok)"}">${fmt(num(est))}${bad ? ` (у вас ${fmt(own)})` : " ✓"}</b>`; };
+  return `<span style="grid-column:1/-1;margin-top:6px;font-weight:600">По смете работ («${esc(d.name)}»)</span>` +
+    row("Пол, м²", d.floor, m.floor) + row("Стены, м²", d.walls, m.walls) + row("Периметр, м", d.perim, m.perim) + row("Высота, м", d.H, num(r.h));
+}
 function renderMetrics(){
   const r = room(sel); if (!r) return;
   const m = metrics(r), g = gap(r);
@@ -493,7 +515,7 @@ function renderMetrics(){
     ["Стены без вычета", fmt(m.wallsGross) + " м²"], ["Стены за вычетом проёмов", fmt(m.walls) + " м²"],
     ["Периметр", fmt(m.perim) + " м"], ["Плинтус (без дверей)", fmt(m.plinth) + " м"],
     ["Откосы окон / дверей", fmt(m.slopesWin) + " / " + fmt(m.slopesDoor) + " м"], ["Объём", fmt(m.volume) + " м³"]
-  ].map(([a,b]) => `<span>${a}</span><b>${b}</b>`).join("");
+  ].map(([a,b]) => `<span>${a}</span><b>${b}</b>`).join("") + estCompare(r, m);
   const gi = $("#gapInfo");
   if (gi) gi.innerHTML = g.d < 0.005 ? `<span style="color:var(--ok)">контур замкнут ✓</span>`
     : `<span class="warn">не замкнут: не хватает ${fmt(Math.abs(g.dx))} м ${g.dx >= 0 ? "вправо" : "влево"}, ${fmt(Math.abs(g.dy))} м ${g.dy >= 0 ? "вниз" : "вверх"}</span>`;
@@ -559,41 +581,70 @@ function fitBox(rooms){
   return {x: (x0 + x1)/2 - w/2, y: (y0 + y1)/2 - h/2, w, h};
 }
 function shownRooms(){ return viewScope === "one" && room(sel) ? [room(sel)] : P.rooms; }
+function overlaps(){ // пары комнат, которые заметно накладываются друг на друга
+  const out = [], B = P.rooms.map(bbox);
+  for (let i = 0; i < B.length; i++) for (let j = i + 1; j < B.length; j++) {
+    const w = Math.min(B[i].x1, B[j].x1) - Math.max(B[i].x0, B[j].x0), h = Math.min(B[i].y1, B[j].y1) - Math.max(B[i].y0, B[j].y0);
+    if (w > 0.15 && h > 0.15) out.push([P.rooms[i], P.rooms[j]]);
+  }
+  return out;
+}
+function arrangeRooms(){ // разложить рядами без наложений (сохраняя порядок сверху вниз, слева направо)
+  const rs = [...P.rooms].sort((a, b) => (bbox(a).y0 - bbox(b).y0) || (bbox(a).x0 - bbox(b).x0));
+  let x = 0, y = 0, rowH = 0;
+  for (const r of rs) { const b = bbox(r), w = b.x1 - b.x0, h = b.y1 - b.y0;
+    if (x > 0 && x + w > 14) { x = 0; y = r2(y + rowH + 0.6); rowH = 0; }
+    r.x = r2(r.x + x - b.x0); r.y = r2(r.y + y - b.y0); x = r2(x + w + 0.6); rowH = Math.max(rowH, h); }
+  save(); vb = null; renderView(); toast("Комнаты разложены без наложений");
+}
 function render2D(){
   const el = $("#view"), rooms = shownRooms();
   if (!vb) vb = fitBox(rooms);
-  const fs = vb.w / 45, sw = vb.w / 500;
+  const fs = vb.w / 45, sw = vb.w / 500, halo = `paint-order="stroke" stroke="#fff" stroke-width="${fs * 0.22}" stroke-linejoin="round"`;
+  const txtW = (t, f) => String(t).length * f * 0.56; // примерная ширина подписи
   let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb.x} ${vb.y} ${vb.w} ${vb.h}" id="svg">
     <defs><pattern id="g1" width="1" height="1" patternUnits="userSpaceOnUse"><path d="M1 0H0V1" fill="none" stroke="#e3e7ee" stroke-width="${sw}"/></pattern></defs>
     <rect x="${vb.x}" y="${vb.y}" width="${vb.w}" height="${vb.h}" fill="url(#g1)" data-bg="1"/>`;
-  for (const r of rooms) {
-    const p = points(r).map(([x,y]) => [x + r.x, y + r.y]), S = segs(r), on = r.id === sel, m = metrics(r);
-    s += `<g data-room="${r.id}" style="cursor:move">
-      <polygon points="${p.slice(0, -1).map(q => q.join(",")).join(" ")}" fill="${on ? "var(--room-sel)" : "var(--room)"}" stroke="${on ? "var(--accent)" : "#44506a"}" stroke-width="${sw*(on?5:3.5)}" stroke-linejoin="round"/>`;
-    S.forEach((g, i) => {
-      const [nx, ny] = inward(r, g), mx = (g.x0+g.x1)/2 + r.x, my = (g.y0+g.y1)/2 + r.y;
-      const off = fs * 0.9, tx = mx - nx*off, ty = my - ny*off + fs*0.35, rot = Math.abs(g.ux) > 0.5 ? 0 : -90;
-      if (g.len > 0.01) s += `<text x="${tx}" y="${ty}" font-size="${fs}" text-anchor="middle" fill="#1d2433" transform="rotate(${rot} ${tx} ${ty - fs*0.35})">${fmt(g.len)}</text>`;
-      if (on) s += `<circle cx="${mx + nx*fs*0.9}" cy="${my + ny*fs*0.9}" r="${fs*0.55}" fill="#fff" stroke="var(--accent)" stroke-width="${sw*2}"/><text x="${mx + nx*fs*0.9}" y="${my + ny*fs*0.9 + fs*0.3}" font-size="${fs*0.75}" text-anchor="middle" fill="var(--accent)">${i+1}</text>`;
-    });
+  const order = [...rooms].sort((a, b) => (a.id === sel) - (b.id === sel)); // выбранная комната — поверх
+  let labels = "";
+  for (const r of order) {
+    const p = points(r).map(([x,y]) => [x + r.x, y + r.y]), S = segs(r), on = r.id === sel, m = metrics(r), b = bbox(r);
+    s += `<g data-room="${r.id}" style="cursor:move"><title>${esc(r.name)} — ${fmt(m.floor)} м²</title>
+      <polygon points="${p.slice(0, -1).map(q => q.join(",")).join(" ")}" fill="${on ? "var(--room-sel)" : "var(--room)"}" fill-opacity="${on ? 1 : 0.92}" stroke="${on ? "var(--accent)" : "#44506a"}" stroke-width="${sw*(on?5:3.5)}" stroke-linejoin="round"/>`;
     for (const o of r.openings) {
       const g = S[o.wall]; if (!g) continue;
-      const [nx, ny] = inward(r, g), a = num(o.pos), b = a + num(o.w);
-      const ax = g.x0 + g.ux*a + r.x, ay = g.y0 + g.uy*a + r.y, bx = g.x0 + g.ux*b + r.x, by = g.y0 + g.uy*b + r.y;
+      const [nx, ny] = inward(r, g), a = num(o.pos), bb = a + num(o.w);
+      const ax = g.x0 + g.ux*a + r.x, ay = g.y0 + g.uy*a + r.y, bx = g.x0 + g.ux*bb + r.x, by = g.y0 + g.uy*bb + r.y;
       s += `<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="#fff" stroke-width="${sw*7}"/>`;
       if (o.type === "window") s += `<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="#3a8ee6" stroke-width="${sw*6}"/><line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="#fff" stroke-width="${sw*2}"/>`;
       else if (o.type === "door") { const w = num(o.w), ex = ax + nx*w, ey = ay + ny*w, sweep = (g.ux*ny - g.uy*nx) > 0 ? 0 : 1;
         s += `<line x1="${ax}" y1="${ay}" x2="${ex}" y2="${ey}" stroke="#8a5a2b" stroke-width="${sw*3}"/><path d="M${ex} ${ey} A${w} ${w} 0 0 ${sweep} ${bx} ${by}" fill="none" stroke="#8a5a2b" stroke-width="${sw*1.5}" stroke-dasharray="${sw*6} ${sw*4}"/>`; }
       else s += `<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="#9aa3b5" stroke-width="${sw*2}" stroke-dasharray="${sw*5} ${sw*4}"/>`;
     }
-    const c = labelPoint(r);
-    s += `<text x="${c[0]}" y="${c[1] - fs*0.2}" font-size="${fs*1.1}" font-weight="600" text-anchor="middle" fill="#1d2433">${esc(r.name)}</text>
-          <text x="${c[0]}" y="${c[1] + fs*1.0}" font-size="${fs*0.95}" text-anchor="middle" fill="#475069">${fmt(m.floor)} м²</text>`;
-    const g = gap(r); if (g.d >= 0.005) { const l = p[p.length-1]; s += `<circle cx="${l[0]}" cy="${l[1]}" r="${fs*0.4}" fill="var(--bad)"/>`; }
+    const g0 = gap(r); if (g0.d >= 0.005) { const l = p[p.length-1]; s += `<circle cx="${l[0]}" cy="${l[1]}" r="${fs*0.4}" fill="var(--bad)"/>`; }
     s += `</g>`;
+    // подписи — отдельным слоем поверх всех комнат, размер подгоняется под комнату
+    // размеры стен: у выбранной комнаты — снаружи (крупно), у остальных — внутри и только если комната достаточно большая на экране
+    const minSide = Math.min(b.x1 - b.x0, b.y1 - b.y0), outside = on || viewScope === "one", show = outside || minSide >= fs * 6;
+    S.forEach((g, i) => {
+      const [nx, ny] = inward(r, g), mx = (g.x0+g.x1)/2 + r.x, my = (g.y0+g.y1)/2 + r.y, t = fmt(g.len), f = Math.min(fs, g.len / (t.length * 0.62));
+      if (g.len > 0.01 && show && f > fs * 0.45) {
+        const off = (f * 0.75 + sw * 3) * (outside ? -1.6 : 1), tx = mx + nx*off, ty = my + ny*off, rot = Math.abs(g.ux) > 0.5 ? 0 : -90;
+        labels += `<text x="${tx}" y="${ty + f*0.35}" font-size="${f}" text-anchor="middle" fill="#1d2433" ${halo} transform="rotate(${rot} ${tx} ${ty})" pointer-events="none">${t}</text>`;
+      }
+      if (on && minSide >= fs * 3) { const cx = mx + nx*fs*0.9 + g.ux*Math.min(g.len * 0.3, fs * 1.6), cy = my + ny*fs*0.9 + g.uy*Math.min(g.len * 0.3, fs * 1.6); // номер стены — внутри, сбоку от середины
+        labels += `<circle cx="${cx}" cy="${cy}" r="${fs*0.55}" fill="#fff" stroke="var(--accent)" stroke-width="${sw*2}" pointer-events="none"/><text x="${cx}" y="${cy + fs*0.3}" font-size="${fs*0.75}" text-anchor="middle" fill="var(--accent)" pointer-events="none">${i+1}</text>`; }
+    });
+    const c = labelPoint(r), rw = (b.x1 - b.x0) * 0.8, rh = (b.y1 - b.y0);
+    const fn = Math.min(fs * 1.1, rw / (String(r.name).length * 0.6), rh / 3.5), fa = Math.min(fs * 0.95, rw / 6, rh / 3.5);
+    if (fn > fs * 0.45) labels += `<text x="${c[0]}" y="${c[1] - fn*0.15}" font-size="${fn}" font-weight="600" text-anchor="middle" fill="#1d2433" ${halo} pointer-events="none">${esc(r.name)}</text>`;
+    if (fa > fs * 0.4) labels += `<text x="${c[0]}" y="${c[1] + fa*1.05 + (fn > fs * 0.45 ? 0 : -fa)}" font-size="${fa}" text-anchor="middle" fill="#475069" ${halo} pointer-events="none">${fmt(m.floor)} м²</text>`;
   }
-  s += `</svg><div class="zoombtns noprint"><button data-z="in" title="Приблизить">+</button><button data-z="out" title="Отдалить">−</button><button data-z="fit" title="Показать всё">⤢</button></div>
-    <div class="hint">${rooms.length ? "Тяните комнату, чтобы передвинуть · колесо/щипок — масштаб · тяните фон — сдвиг" : "Добавьте комнату"}</div>`;
+  const ov = viewScope === "all" ? overlaps() : [];
+  s += labels + `</svg><div class="zoombtns noprint"><button data-z="in" title="Приблизить">+</button><button data-z="out" title="Отдалить">−</button><button data-z="fit" title="Показать всё">⤢</button></div>
+    ${ov.length ? `<div class="noprint" style="position:absolute;left:8px;top:8px;right:56px;background:#fff6e5;border:1px solid #f0c36d;border-radius:8px;padding:6px 10px;font-size:13px">
+      Комнаты накладываются друг на друга (${ov.slice(0, 3).map(([a, b]) => `«${esc(a.name)}» и «${esc(b.name)}»`).join(", ")}${ov.length > 3 ? "…" : ""}). <button class="small" data-arrange="1">Разложить без наложений</button></div>` : ""}
+    <div class="hint">${rooms.length ? "Тяните комнату, чтобы передвинуть · колесо/щипок — масштаб · тяните фон — сдвиг · наведите на комнату — название" : "Добавьте комнату"}</div>`;
   el.innerHTML = s;
 }
 function labelPoint(r){ // точка внутри комнаты, максимально удалённая от стен
@@ -612,6 +663,7 @@ function svgPt(e){ const svg = $("#svg"); const pt = svg.createSVGPoint(); pt.x 
 function zoomAt(f, cx, cy){ if (!vb) return; const nw = Math.min(200, Math.max(1, vb.w * f)), k = nw / vb.w; vb = {x: cx - (cx - vb.x)*k, y: cy - (cy - vb.y)*k, w: nw, h: vb.h * k}; render2D(); }
 $("#view").addEventListener("pointerdown", e => {
   if (viewMode !== "2d") return;
+  if (e.target.closest("[data-arrange]")) { arrangeRooms(); return; }
   const z = e.target.closest("[data-z]");
   if (z) { const cx = vb.x + vb.w/2, cy = vb.y + vb.h/2; if (z.dataset.z === "fit") { vb = fitBox(shownRooms()); render2D(); } else zoomAt(z.dataset.z === "in" ? 0.8 : 1.25, cx, cy); return; }
   if (!$("#svg")) return;
@@ -753,6 +805,8 @@ document.querySelectorAll("[data-scope]").forEach(b => b.onclick = () => { viewS
 let last3 = "";
 function renderView(){
   $("#lowWallsWrap").style.display = viewMode === "3d" ? "" : "none";
+  document.querySelector("[data-scope]").parentNode.style.display = viewMode === "proj" ? "none" : "";
+  if (viewMode === "proj") { renderProject(); last3 = ""; $("#viewHelp").textContent = ""; return; }
   if (viewMode === "2d") { render2D(); last3 = ""; }
   else { const key = viewScope + (viewScope === "one" ? sel : ""); build3D(last3 === key); last3 = key; }
   $("#viewHelp").textContent = viewMode === "2d" ? "Цифры у стен — длины в метрах. Синие кружки — номера стен выбранной комнаты (нужны для дверей и окон). Комнаты прилипают друг к другу при перетаскивании." : "";
@@ -761,8 +815,10 @@ window.addEventListener("resize", () => { if (viewMode === "2d" && $("#svg")) { 
 
 /* ================= Смета ================= */
 let pickFor = null; // id комнаты или "common"
+let ownCalcTouched = false;
 function renderEstimate(){
   const el = $("#estimate");
+  if (!ownCalcTouched) $("#ownCalc").open = P.rooms.some(r => r.items.length) || P.common.length > 0;
   const blocks = P.rooms.map(r => ({key: r.id, title: r.name || "Без названия", m: metrics(r), items: r.items, sub: (() => { const m = metrics(r); return `пол ${fmt(m.floor)} м² · стены ${fmt(m.walls)} м² · периметр ${fmt(m.perim)} м`; })()}));
   blocks.push({key: "common", title: "Общее на объект", m: totalMetrics(), items: P.common, sub: "основа — сумма по всем комнатам (или своё количество)"});
   let grand = 0;
@@ -791,9 +847,9 @@ function renderEstimate(){
     `<h3>Сводная по материалам (что закупить на весь объект)</h3>
     ${sum.length ? `<div class="scrollx"><table><tr><th>Материал</th><th class="r">Количество</th><th>Ед.</th><th class="r">Цена</th><th class="r">Сумма</th></tr>
     ${sum.map(s => `<tr><td>${esc(s.name)}</td><td class="r">${fmt(s.qty)}</td><td>${esc(s.unit)}</td><td class="r">${money(s.price)}</td><td class="r">${money(s.sum)}</td></tr>`).join("")}</table></div>` : `<div class="muted">Пусто.</div>`}
-    <div class="total">Всего материалы по объекту: ${money(grand)}</div>
+    <div class="total">Итого свой расчёт материалов: ${money(grand)}</div>
     ${sum.some(s => s.kg) ? `<div class="muted" style="text-align:right">Общий вес материалов (где вес указан в базе): <b>${fmt(sum.reduce((a, s) => a + s.kg, 0), 0)} кг</b> — для расчёта доставки и подъёма</div>` : ""}`;
-  if (typeof renderWorks === "function") renderWorks();
+  if (typeof renderWorks === "function") { renderMats(); renderWorks(); }
 }
 function summary(){
   const map = new Map();
@@ -821,6 +877,7 @@ $("#estimate").addEventListener("click", e => {
   }
 });
 $("#btnPrint").onclick = () => window.print();
+$("#ownCalc").addEventListener("toggle", () => { ownCalcTouched = true; });
 $("#btnRefreshPrices").onclick = () => {
   if (!DB.items.length) return toast("База материалов не загружена");
   const idx = new Map(DB.items.map(m => [norm(m.name) + "|" + norm(m.unit), m])); let n = 0, miss = 0;
@@ -951,6 +1008,7 @@ $("#btnTemplate").onclick = () => {
 
 /* ================= Пример (выдуманные данные) ================= */
 function loadDemo(){
+  if (typeof clearProject === "function") clearProject();
   P = newProject(); P.name = "Пример: двухкомнатная квартира";
   const a = newRoom("Гостиная", 5.2, 4.1); a.openings = [{id: uid(), type: "window", wall: 0, pos: 1.6, w: 1.8, h: 1.5, sill: 0.8}, {id: uid(), type: "door", wall: 2, pos: 0.4, w: 0.9, h: 2.0, sill: 0}];
   const b = newRoom("Спальня", 3.6, 4.1); b.x = 5.2; b.openings = [{id: uid(), type: "window", wall: 0, pos: 1.0, w: 1.4, h: 1.5, sill: 0.8}, {id: uid(), type: "door", wall: 2, pos: 2.3, w: 0.8, h: 2.0, sill: 0}];

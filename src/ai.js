@@ -178,11 +178,52 @@ async function fileToImages(file, maxPages = 8, opts = {}){
 }
 async function filesToImages(files, opts){ const out = []; for (const f of files) out.push(...await fileToImages(f, 8, opts)); return out; }
 
+/* ---------- Проект (PDF) для просмотра: хранится на устройстве (IndexedDB), в файл объекта не попадает ---------- */
+let projPages = [], projPage = 0, projZoom = 1;
+function idb(){ return new Promise((ok, bad) => { try { const q = indexedDB.open("remont", 1); q.onupgradeneeded = () => q.result.createObjectStore("files"); q.onsuccess = () => ok(q.result); q.onerror = () => bad(q.error); } catch(e) { bad(e); } }); }
+async function idbPut(key, val){ try { const db = await idb(); await new Promise((ok, bad) => { const tx = db.transaction("files", "readwrite"); tx.objectStore("files").put(val, key); tx.oncomplete = ok; tx.onerror = () => bad(tx.error); }); } catch(e) { /* хранилище недоступно — проект будет только до перезагрузки */ } }
+async function idbGet(key){ try { const db = await idb(); return await new Promise((ok, bad) => { const q = db.transaction("files").objectStore("files").get(key); q.onsuccess = () => ok(q.result); q.onerror = () => bad(q.error); }); } catch(e) { return null; } }
+function setProject(pages, file){
+  projPages = pages; projPage = Math.max(0, pages.findIndex(p => /обмерн/i.test(p.title || ""))); projZoom = 1;
+  P.project = {file, pages: pages.length, text: pages.map((p, i) => `[Лист ${i + 1}${p.title ? " — " + p.title : ""}] ` + (p.text || "").replace(/\s+/g, " ")).join("\n").slice(0, 12000)};
+  save(); idbPut("project", {pages, file});
+}
+function clearProject(){ projPages = []; idbPut("project", null); if (P) delete P.project; }
+idbGet("project").then(v => { if (v && v.pages && v.pages.length && P.project) { projPages = v.pages; projPage = Math.max(0, v.pages.findIndex(p => /обмерн/i.test(p.title || ""))); if (viewMode === "proj") renderProject(); } });
+function renderProject(){
+  const el = $("#view");
+  if (!projPages.length) {
+    el.innerHTML = `<div class="empty" style="padding-top:60px">Проект не загружен.<br><br><button class="primary" id="projLoad">Загрузить проект (PDF или фото)…</button>
+      <div class="muted" style="margin-top:10px;font-size:12px">Проект нужен для наглядности: посмотреть, что где. Расчёты идут по смете.<br>Проект хранится только на этом устройстве.</div></div>`;
+    return;
+  }
+  const pg = projPages[Math.min(projPage, projPages.length - 1)];
+  el.innerHTML = `<div style="position:absolute;inset:0;overflow:auto;background:#fff" id="projScroll"><img src="${pg.url}" alt="" style="display:block;width:${projZoom * 100}%;max-width:none"></div>
+    <div class="zoombtns noprint"><button data-pz="in" title="Приблизить">+</button><button data-pz="out" title="Отдалить">−</button><button data-pz="fit" title="По ширине">⤢</button></div>
+    <div class="noprint" style="position:absolute;left:8px;bottom:8px;right:56px;display:flex;gap:4px;flex-wrap:wrap">
+      ${projPages.map((p, i) => `<button class="small" data-pp="${i}" style="${i === projPage ? "background:var(--accent);color:#fff" : "background:rgba(255,255,255,.95)"}">${esc(p.title || "Лист " + (i + 1))}</button>`).join("")}
+      <button class="small" id="projLoad" style="background:rgba(255,255,255,.95)">Заменить…</button></div>`;
+}
+$("#view").addEventListener("click", e => {
+  if (viewMode !== "proj") return;
+  const t = e.target.closest("button"); if (!t) return;
+  if (t.id === "projLoad") { const i = document.createElement("input"); i.type = "file"; i.accept = "application/pdf,image/*"; i.multiple = true;
+    i.onchange = async () => { const files = [...i.files]; if (!files.length) return; $("#view").innerHTML = `<div class="busy" style="margin:20px">Открываю проект…</div>`;
+      try { const pages = (await filesToImages(files, {tiles: true})).map(p => ({...p, title: pageTitle(p.text)})); setProject(pages, files.map(f => f.name).join(", ")); }
+      catch(err) { toast(err.msg || "Не удалось открыть файл"); } renderProject(); };
+    i.click(); return; }
+  if (t.dataset.pp !== undefined) { projPage = +t.dataset.pp; projZoom = 1; renderProject(); }
+  if (t.dataset.pz) { projZoom = t.dataset.pz === "fit" ? 1 : Math.min(8, Math.max(1, projZoom * (t.dataset.pz === "in" ? 1.5 : 1 / 1.5))); const sc = $("#projScroll"), fx = (sc.scrollLeft + sc.clientWidth / 2) / sc.scrollWidth, fy = (sc.scrollTop + sc.clientHeight / 2) / sc.scrollHeight;
+    renderProject(); const s2 = $("#projScroll"); s2.scrollLeft = fx * s2.scrollWidth - s2.clientWidth / 2; s2.scrollTop = fy * s2.scrollHeight - s2.clientHeight / 2; }
+});
+
 /* ---------- Распознавание плана ---------- */
 let recPages = [], recLast = null; // recLast: {pages, notes, checks, backup}
 function openRecognize(){
   if (!aiReady()) { toast("Сначала подключите ИИ"); openAI(); return; }
-  recPages = []; renderRec(); $("#recModal").classList.add("on");
+  recPages = projPages.map(p => ({...p, on: /обмерн/i.test(p.title || "")}));
+  if (recPages.length && !recPages.some(p => p.on)) recPages.forEach(p => p.on = true);
+  renderRec(); $("#recModal").classList.add("on");
 }
 function renderRec(){
   $("#recBody").innerHTML = `
@@ -213,6 +254,7 @@ $("#recBody").addEventListener("change", async e => {
     // в проекте много листов (мебель, свет, электрика) — для размеров нужен обмерный план
     const meas = [/обмерн/i, /план\s+(помещений|квартиры)/i, /экспликац/i].map(re => recPages.filter(p => re.test(p.text))).find(x => x.length) || [];
     if (meas.length) recPages.forEach(p => p.on = meas.includes(p));
+    setProject(recPages.map(({name, title, url, tiles, text}) => ({name, title, url, tiles, text})), files.map(f => f.name).join(", ")); // проект сохраняется для просмотра
     renderRec();
   }
   catch(err) { $("#recMsg").innerHTML = `<div class="errbox">${esc(err.msg || "Не удалось открыть файл: " + (err.message || err))}</div>`; }
@@ -307,11 +349,11 @@ function docOf(k){
   if (P.client) delete P.client;
   return (P[k] = P[k] || {lines: [], total: null, notes: "", files: ""});
 }
-const DOC_NAME = {works: "смета работ", act: "акт выполненных работ"};
+const DOC_NAME = {works: "смету работ", act: "таблицу акта", mats: "смету материалов"};
 const lineSum = l => (l.sum !== "" && l.sum != null) ? num(l.sum) : r2(num(l.qty) * num(l.price));
 const docSum = d => r2(d.lines.reduce((a, l) => a + lineSum(l), 0));
 const workLines = d => d.lines.filter(l => l.kind !== "material");
-const docSumD = d => { const k = discK(); return r2(d.lines.reduce((a, l) => a + lineSum(l) * (l.nodisc ? 1 : k), 0)); }; // с учётом скидки
+const docSumD = (d, pct) => { const k = pct == null ? discK() : 1 - num(pct) / 100; return r2(d.lines.reduce((a, l) => a + lineSum(l) * (l.nodisc ? 1 : k), 0)); }; // с учётом скидки
 const discK = () => 1 - Math.min(100, Math.max(0, num(docOf("works").discount))) / 100; // скидка из сметы работ — и к акту
 const KIND = {work: "работа", material: "материал", other: "прочее"};
 function words(s){ return norm(s).replace(/[^a-zа-я0-9 ]/g, " ").split(" ").filter(w => w.length > 2 && !/^(для|под|без|мм|шт)$/.test(w)).map(w => w.slice(0, 5)); }
@@ -338,7 +380,7 @@ function linesFromSheet(ws){
   const rows = XLSX.utils.sheet_to_json(ws, {header: 1, raw: true, defval: ""});
   const T = c => norm(c), isNum = c => typeof c === "number" || /^-?\d+([.,]\d+)?$/.test(String(c).trim());
   const isQty = c => /^(кол-?во|количество|объ[её]м|кол\.)/.test(T(c)), isPrice = c => /^(цена|расценк|стоимость ед)/.test(T(c)), isSum = c => /^(сумма|стоимость|всего)/.test(T(c));
-  let col = null, big = "", sub = "", total = null, discount = null; const cand = [];
+  let col = null, big = "", sub = "", total = null, discount = null, zeroTotal = false; const cand = [];
   for (const r of rows) {
     // скидка, % — где угодно на листе
     const di = r.findIndex(c => /^скидка/.test(T(c)));
@@ -359,7 +401,7 @@ function linesFromSheet(ws){
     const name = String(r[col.name] ?? "").trim(), texts = r.map(c => String(c).trim()).filter(c => c && !isNum(c));
     if (/^(итого|всего)/i.test(name) || /^(итого|всего)/i.test(texts[0] || "")) {
       const t = T(name || texts[0]), v = num(r[col.sum]);
-      if (!/скидк|раздел/.test(t) && /помещени|стоимость работ|по смете|^всего|^итого:?$/.test(t) && v) total = v;
+      if (!/скидк|раздел/.test(t) && /помещени|стоимость работ|по смете|^всего|^итого:?$/.test(t)) { if (v) total = v; else if (isNum(r[col.sum])) zeroTotal = true; }
       continue;
     }
     const q = r[col.qty], sm = col.sum >= 0 ? r[col.sum] : "", pr = col.price >= 0 ? r[col.price] : "";
@@ -371,29 +413,59 @@ function linesFromSheet(ws){
   }
   if (!cand.length) return discount != null ? {lines: [], total: null, discount, flagged: false, all: 0} : null;
   // колонка-отметка «1 — входит в смету»: только 0/1/пусто, есть и отмеченные, и неотмеченные строки
-  let flag = -1;
+  let flag = -1, noneSelected = false;
   for (let c = 0; c < col.name; c++) {
     const vals = cand.map(x => x.r[c]);
-    if (vals.every(v => v === "" || v === 0 || v === 1 || v === "0" || v === "1") && vals.some(v => +v === 1) && vals.some(v => +v !== 1)) { flag = c; break; }
+    if (!vals.every(v => v === "" || v === 0 || v === 1 || v === "0" || v === "1")) continue;
+    const ones = vals.filter(v => v !== "" && +v === 1).length, explicit = vals.filter(v => v !== "").length;
+    if (ones && ones < vals.length) { flag = c; break; }
+    if (!ones && explicit >= vals.length * 0.5) { // везде 0: если и количества везде 1 — это пустой шаблон/прайс, ничего не выбрано
+      // итог в документе 0 при ненулевых строках или везде количество 1 — это пустой шаблон-прайс, ничего не выбрано
+      if (zeroTotal || cand.every(x => !isNum(x.line.qty) || num(x.line.qty) === 1)) { flag = c; noneSelected = true; }
+      break;
+    }
   }
   const lines = cand.filter(x => flag < 0 || +x.r[flag] === 1).map(x => normLine(x.line)).filter(l => num(l.qty) || num(l.sum));
+  if (!lines.length && noneSelected) return {lines: [], total, discount, flagged: true, all: cand.length, noneSelected: true};
   return lines.length ? {lines, total, discount, flagged: flag >= 0, all: cand.length} : null;
 }
+/* Размеры помещения в шапке листа сметы: строка «L,м/п | B,м/п | H,м/п | Проем, м2», значения — строкой ниже;
+   «Периметр», «Площадь пола», «Площадь стен» — значение под подписью. */
+function roomDimsFromSheet(ws, name){
+  const rows = XLSX.utils.sheet_to_json(ws, {header: 1, raw: true, defval: ""}).slice(0, 30), T = c => norm(c), d = {name};
+  const below = (i, j) => { for (let k = i + 1; k < Math.min(rows.length, i + 3); k++) if (typeof rows[k][j] === "number") return rows[k][j]; return null; };
+  rows.forEach((r, i) => r.forEach((c, j) => {
+    const t = T(c);
+    if (d.L == null && /^l\s*,/.test(t)) d.L = below(i, j);
+    if (d.B == null && /^b\s*,/.test(t)) d.B = below(i, j);
+    if (d.H == null && /^h\s*,/.test(t)) d.H = below(i, j);
+    if (d.open == null && /^про[её]м/.test(t)) d.open = below(i, j);
+    if (d.perim == null && /^периметр$/.test(t)) d.perim = below(i, j);
+    if (d.floor == null && /^площадь пола$/.test(t)) d.floor = below(i, j);
+    if (d.walls == null && /^площадь стен$/.test(t)) d.walls = below(i, j);
+  }));
+  return num(d.L) > 0 && num(d.B) > 0 ? d : null;
+}
+const DOC_MSG = {works: "#worksMsg", act: "#actMsg", mats: "#matsMsg"};
+const renderDoc = k => k === "works" ? renderWorks() : k === "mats" ? renderMats() : renderAct();
 async function loadDoc(k, files){
-  const D = docOf(k), msg = $(k === "works" ? "#worksMsg" : "#actMsg");
-  if (D.lines.length && !confirm(`Заменить уже загруженную ${k === "works" ? "смету работ" : "таблицу акта"}?`)) return;
+  const D = docOf(k), msg = $(DOC_MSG[k]);
+  if (D.lines.length && !confirm(`Заменить уже загруженную ${DOC_NAME[k]}?`)) return;
   const xl = files.filter(f => /\.(xlsx|xlsm|xls|csv)$/i.test(f.name)), other = files.filter(f => !xl.includes(f));
   let res = null;
   if (xl.length && !other.length) {
     msg.innerHTML = `<div class="busy">Читаю Excel…</div>`; await new Promise(r => setTimeout(r, 50));
-    const parts = []; let discount = null;
+    const parts = [], dims = []; let discount = null, empty = false;
     for (const f of xl) {
       const wb = XLSX.read(await f.arrayBuffer(), {type: "array"});
       wb.SheetNames.forEach((sn, i) => { if (wb.Workbook?.Sheets?.[i]?.Hidden) return; // скрытые листы пропускаем
-        const r = linesFromSheet(wb.Sheets[sn]); if (r) { if (r.discount != null) discount = r.discount; if (r.lines.length) parts.push({sn: sn.trim(), ...r}); } });
+        const r = linesFromSheet(wb.Sheets[sn]); if (r) { if (r.discount != null) discount = r.discount; if (r.noneSelected) empty = true; if (r.lines.length) parts.push({sn: sn.trim(), ...r}); }
+        const dm = roomDimsFromSheet(wb.Sheets[sn], sn.trim()); if (dm) dims.push(dm); });
     }
     msg.innerHTML = "";
-    if (!parts.length) { msg.innerHTML = `<div class="errbox">Не нашёл в Excel таблицу с колонками «Наименование» и «Количество»/«Сумма».</div>`; return; }
+    if (!parts.length) { msg.innerHTML = empty
+      ? `<div class="errbox">В файле не отмечена ни одна позиция (в колонке-отметке везде 0, итог сметы 0) — это пустой шаблон-прайс. Его место — «База материалов» (вкладка 3); сюда загружайте заполненную смету.</div>`
+      : `<div class="errbox">Не нашёл в Excel таблицу с колонками «Наименование» и «Количество»/«Сумма».</div>`; return; }
     const multi = parts.length > 1, lines = [];
     // если скидка есть в смете, но на каком-то листе её нет (например, «Спецмонтаж») — строки этого листа без скидки
     const someDisc = parts.some(x => x.discount != null);
@@ -402,22 +474,43 @@ async function loadDoc(k, files){
     const notes = [multi ? `Прочитано листов: ${parts.length} (${parts.map(x => x.sn).join(", ")}).` : "",
       parts.some(x => x.flagged) ? "В смету взяты только строки, отмеченные «1» (остальные — шаблон)." : "",
       discount ? `Скидка из сметы: ${discount}%${lines.some(l => l.nodisc) ? ` (кроме: ${[...new Set(lines.filter(l => l.nodisc).map(l => l.room))].join(", ")})` : ""}.` : ""].filter(Boolean).join(" ");
-    res = {lines, total, notes, discount};
+    res = {lines, total, notes, discount, dims};
   } else {
     if (!aiReady()) { toast("Для PDF и фото нужен ИИ — подключите его"); openAI(); return; }
     res = await withBusy(msg, `ИИ читает ${DOC_NAME[k]} (обычно 20–120 секунд)`, async signal => {
       const pages = await filesToImages(other);
       return parseAIJSON(await callAI({signal, maxTokens: 16000, system: "Ты — внимательный сметчик. Отвечаешь только JSON.",
-        messages: [{role: "user", parts: [...pages.map(p => ({image: p.url})), {text: DOC_PROMPT(k === "works" ? "смета" : "акт выполненных работ")}]}]}));
+        messages: [{role: "user", parts: [...pages.map(p => ({image: p.url})), {text: DOC_PROMPT(k === "act" ? "акт выполненных работ" : k === "mats" ? "смета на материалы" : "смета")}]}]}));
     });
     if (!res) return;
     res.lines = (res.lines || []).filter(l => l && l.name).map(normLine);
     if (res.discount != null && !(num(res.discount) > 0 && num(res.discount) < 100)) res.discount = null;
   }
   D.lines = res.lines; D.total = res.total == null ? null : num(res.total); D.notes = String(res.notes || ""); D.files = files.map(f => f.name).join(", ");
-  if (k === "works") D.discount = res.discount != null ? num(res.discount) : 0; // новая смета — своя скидка
+  if (k !== "act") D.discount = res.discount != null ? num(res.discount) : 0; // новая смета — своя скидка
+  if (k === "mats") D.lines.forEach(l => l.kind = "material");
+  if (k === "works") D.roomDims = (res.dims || []).filter(d => num(d.L) > 0);
   if (k === "act") { const n = D.lines.length; D.lines = workLines(D); if (n > D.lines.length) toast(`Строки материалов (${n - D.lines.length}) пропущены — в акте только работы`); autoRef(); }
-  save(); k === "works" ? renderWorks() : renderAct(); toast(`Строк: ${D.lines.length}`);
+  save(); renderDoc(k); toast(`Строк: ${D.lines.length}`);
+  if (k === "works" && D.roomDims.length && confirm(`В смете есть размеры ${D.roomDims.length} помещений (${D.roomDims.map(d => d.name).join(", ")}).\n${P.rooms.length ? "Заменить ими комнаты на плане?" : "Построить по ним комнаты?"}`)) roomsFromEstimate(true);
+}
+$("#btnRoomsEst").onclick = () => { const d = docOf("works").roomDims || [];
+  if (!d.length) { toast("Сначала загрузите смету работ с размерами помещений (вкладка 2)"); return; }
+  if (!P.rooms.length || confirm(`Заменить комнаты на плане помещениями из сметы (${d.length})?`)) roomsFromEstimate(true); };
+/* Комнаты из размеров в смете: прямоугольник L×B, высота H, проёмы — общей площадью, поправка площади пола как в смете */
+function roomsFromEstimate(replace){
+  const dims = docOf("works").roomDims || [];
+  if (!dims.length) { toast("В смете работ нет размеров помещений (L, B, H)"); return; }
+  const rooms = []; let x = 0, y = 0, rowH = 0;
+  for (const d of dims) {
+    const L = r2(num(d.L)), B = r2(num(d.B)), r = newRoom(d.name, L, B);
+    r.h = num(d.H) > 1 ? r2(num(d.H)) : 2.7; r.openArea = r2(num(d.open));
+    if (d.floor != null && Math.abs(num(d.floor) - L * B) > 0.005) r.floorAdj = r2(num(d.floor) - L * B);
+    if (x > 0 && x + L > 14) { x = 0; y = r2(y + rowH + 1); rowH = 0; }
+    r.x = x; r.y = y; x = r2(x + L + 1); rowH = Math.max(rowH, B); rooms.push(r);
+  }
+  if (replace || !P.rooms.length) P.rooms = rooms; else P.rooms.push(...rooms);
+  sel = rooms[0].id; save(); renderAll(); toast(`Комнат из сметы: ${rooms.length}. Расположение условное — размеры как в смете`);
 }
 const showNum = (v, d) => v === "" || v == null ? "" : (typeof v === "number" ? Math.round(v * 10 ** d) / 10 ** d : v);
 function linesTable(k, D, cols){
@@ -444,34 +537,57 @@ function docHeader(D){
     ${D.total != null && Math.abs(D.total - s) > 1 ? `<div class="warn" style="margin:6px 0">Сумма строк (${money(s)}) не совпадает с итогом в документе (${money(D.total)}) — возможно, какая-то строка прочитана неверно или не попала.</div>` : ""}`;
 }
 // таблицы редактируются одинаково в обоих разделах
-for (const sel of ["#works", "#act"]) {
+for (const sel of ["#works", "#act", "#mats"]) {
   $(sel).addEventListener("change", e => {
     const t = e.target, tr = t.closest("tr[data-doc]"); if (!tr || !t.dataset.k) return;
     const k = tr.dataset.doc, l = docOf(k).lines[+tr.dataset.li];
     if (t.dataset.k === "ref") l.ref = t.value || null;
     else if (["qty", "price"].includes(t.dataset.k)) { l[t.dataset.k] = t.value.replace(",", "."); l.sum = ""; } // сумма пересчитается
     else l[t.dataset.k] = t.value;
-    save(); k === "works" ? renderWorks() : renderAct();
+    save(); renderDoc(k);
   });
   $(sel).addEventListener("click", e => {
     const b = e.target.closest("[data-ldel]"); if (!b) return;
-    const tr = b.closest("tr[data-doc]"), k = tr.dataset.doc; docOf(k).lines.splice(+tr.dataset.li, 1); save(); k === "works" ? renderWorks() : renderAct();
+    const tr = b.closest("tr[data-doc]"), k = tr.dataset.doc; docOf(k).lines.splice(+tr.dataset.li, 1); save(); renderDoc(k);
   });
 }
 /* --- смета работ (вкладка «Смета», нижняя часть) --- */
+function discBox(id, title, D){
+  const s0 = docSum(D), d = num(D.discount), s1 = docSumD(D, id === "matsDisc" ? d : null);
+  return `<div class="box" style="max-width:520px;margin:10px 0 10px auto"><div class="metrics">
+      <span>Итого: ${title}</span><b>${money(s0)}</b>
+      <span>Скидка, % <input class="num" id="${id}" value="${esc(D.discount || 0)}" inputmode="decimal" style="width:60px"></span><b>${d ? "− " + money(r2(s0 - s1)) : "—"}</b>
+      <span><b>С учётом скидки</b></span><b style="font-size:16px">${money(s1)}</b></div></div>`;
+}
 function renderWorks(){
   const el = $("#works"); if (!el) return;
-  const D = docOf("works"), w0 = docSum(D), d = num(D.discount), w = docSumD(D), m = r2(summary().reduce((a, s) => a + s.sum, 0));
-  el.innerHTML = D.lines.length ? docHeader(D) + linesTable("works", D) + `
-    <div class="box" style="max-width:520px;margin:10px 0 10px auto"><div class="metrics">
-      <span>Итого по смете работ</span><b>${money(w0)}</b>
-      <span>Скидка, % <input class="num" id="worksDisc" value="${esc(D.discount || 0)}" inputmode="decimal" style="width:60px"></span><b>${d ? "− " + money(r2(w0 - w)) : "—"}</b>
-      <span><b>Работы с учётом скидки</b></span><b style="font-size:16px">${money(w)}</b></div></div>
-    <div class="box" style="max-width:520px;margin-left:auto"><div class="metrics">
-      <span>Материалы (ваш расчёт)</span><b>${money(m)}</b><span>Работы (смета${d ? ", со скидкой" : ""})</span><b>${money(w)}</b><span><b>Всего по объекту</b></span><b>${money(r2(m + w))}</b></div>
-      ${D.lines.some(l => l.kind === "material") ? `<div class="muted" style="font-size:12px;margin-top:4px">В смете работ есть строки «материал» — если это те же материалы, что в расчёте выше, они посчитаны дважды.</div>` : ""}</div>`
-    : `<div class="muted">Смета работ не загружена. Загрузите согласованную с заказчиком смету (PDF, фото или Excel) или добавьте строки вручную.</div>`;
+  const D = docOf("works");
+  el.innerHTML = D.lines.length ? docHeader(D) + linesTable("works", D) + discBox("worksDisc", "работы", D)
+    : `<div class="muted">Смета работ не загружена. Загрузите согласованную с заказчиком смету (Excel, PDF или фото) или добавьте строки вручную.</div>`;
+  renderEstTotal();
 }
+function renderMats(){
+  const el = $("#mats"); if (!el) return;
+  const D = docOf("mats");
+  el.innerHTML = D.lines.length ? docHeader(D) + linesTable("mats", D) + discBox("matsDisc", "материалы", D)
+    : `<div class="muted">Смета материалов не загружена. Загрузите исходную смету материалов (Excel, PDF или фото) или добавьте строки вручную. Свой расчёт по комнатам — ниже, в разделе «Проверка».</div>`;
+  renderEstTotal();
+}
+function renderEstTotal(){
+  const el = $("#estTotal"); if (!el) return;
+  const M = docOf("mats"), W = docOf("works"), own = r2(summary().reduce((a, s) => a + s.sum, 0));
+  const m = M.lines.length ? docSumD(M, num(M.discount)) : own, w = docSumD(W);
+  el.innerHTML = (M.lines.length || W.lines.length || own) ? `<div class="box" style="max-width:560px;margin-left:auto;background:#f6f9ff"><div class="metrics">
+      <span>Материалы${M.lines.length ? " (смета)" : " (свой расчёт)"}</span><b>${money(m)}</b>
+      <span>Работы (смета${num(W.discount) ? ", со скидкой" : ""})</span><b>${money(w)}</b>
+      <span><b>Всего по объекту</b></span><b style="font-size:17px">${money(r2(m + w))}</b>
+      ${M.lines.length && own ? `<span class="muted">Для сверки: свой расчёт материалов по комнатам</span><b class="muted">${money(own)} (${own > m ? "+" : ""}${money(r2(own - m))})</b>` : ""}</div></div>` : "";
+}
+$("#btnMatsLoad").onclick = () => $("#fileMats").click();
+$("#fileMats").onchange = e => { const f = [...e.target.files]; e.target.value = ""; if (f.length) loadDoc("mats", f); };
+$("#btnMatsAdd").onclick = () => { docOf("mats").lines.push(normLine({kind: "material"})); save(); renderMats(); };
+$("#btnMatsClear").onclick = () => { if (docOf("mats").lines.length && confirm("Очистить смету материалов?")) { P.mats = null; save(); renderMats(); } };
+$("#mats").addEventListener("change", e => { if (e.target.id === "matsDisc") { docOf("mats").discount = num(e.target.value); save(); renderMats(); } });
 $("#btnWorksLoad").onclick = () => $("#fileWorks").click();
 $("#works").addEventListener("change", e => { if (e.target.id === "worksDisc") { docOf("works").discount = num(e.target.value); save(); renderWorks(); } });
 $("#fileWorks").onchange = e => { const f = [...e.target.files]; e.target.value = ""; if (f.length) loadDoc("works", f); };
@@ -686,10 +802,14 @@ function projectContext(question){
     ourTotal: r2(sum.reduce((a, s) => a + s.sum, 0)),
     worksEstimate: W.lines.length ? {note: "согласованная с заказчиком смета работ", discountPercent: num(W.discount), lines: W.lines.map(l => ({room: l.room, section: l.section, name: l.name, kind: l.kind, unit: l.unit, qty: num(l.qty), price: num(l.price), sum: lineSum(l)})), total: docSum(W)} : null,
     act: A.lines.length ? {note: "акт выполненных работ (факт); planLine — строка сметы", lines: A.lines.map(l => ({name: l.name, unit: l.unit, qty: num(l.qty), price: num(l.price), sum: lineSum(l), planLine: W.lines.find(w => w.id === l.ref)?.name || "доп. работа"})), total: docSum(A), differenceToWorksEstimate: r2(docSum(A) - docSum({lines: workLines(W)})), note2: "акт сравнивается только с работами сметы, без материалов"} : null,
+    project: P.project ? {note: "проект квартиры (PDF) — только для наглядности: что где расположено; расчёты ведутся по смете", file: P.project.file, text: P.project.text} : null,
+    estimateRoomDims: (P.works && P.works.roomDims) || null,
+    materialsEstimate: P.mats && P.mats.lines.length ? {lines: P.mats.lines.map(l => ({section: l.section, name: l.name, unit: l.unit, qty: num(l.qty), price: num(l.price), sum: lineSum(l)})), total: docSum(P.mats), discountPercent: num(P.mats.discount)} : null,
     priceBase: {totalItems: DB.items.length, file: DB.file, items: db, note: DB.items.length > 400 ? "показаны только позиции, похожие на вопрос" : "вся база"}});
 }
 const CHAT_SYSTEM = `Ты — помощник прораба в программе расчёта ремонта. Отвечай по-русски, коротко и по делу, простыми словами, с цифрами.
-Опирайся только на данные объекта из программы (они ниже в JSON): замеры комнат, расчёт материалов, согласованная смета работ, акт выполненных работ, база цен пользователя.
+Опирайся только на данные объекта из программы (они ниже в JSON). ГЛАВНЫЙ источник — исходная смета (материалы и работы, в т. ч. размеры помещений из сметы).
+Проект (PDF) — для наглядности: что где стоит. Также есть свой расчёт материалов по комнатам (для проверки), акт выполненных работ и база цен.
 Цены не придумывай и не бери из интернета — только из базы пользователя, сметы и акта. Если данных не хватает — так и скажи и подскажи, что внести в программу.
 Считай аккуратно, показывай расчёт кратко. Единицы: метры, м², м.п., рубли.`;
 const QUICK = ["Сколько заказчику доплатить по акту и за что?", "Что я мог забыть в расчёте?", "Проверь расход материалов — нет ли ошибок?", "Сколько всего стоят материалы по каждой комнате?"];

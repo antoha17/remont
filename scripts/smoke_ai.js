@@ -80,6 +80,12 @@ const path = require('path'), fs = require('fs');
   await page.setInputFiles('#fileWorks', path.join(path.dirname(process.argv[3] || '/tmp/prices.xlsx'), 'works_flag.xlsx'));
   await page.waitForFunction(() => /works_flag/.test(docOf('works').files), null, {timeout: 10000});
   console.log('works flagged:', await page.evaluate(() => { const D = docOf('works'); return D.lines.map(l => `${l.room}|${l.section}|${l.name}|${lineSum(l)}${l.nodisc ? '|без скидки' : ''}`).join('; ') + ` total=${D.total} disc=${D.discount} withDisc=${docSumD(D)}`; }));
+  // смета материалов с отметками «1»
+  await page.setInputFiles('#fileMats', path.join(path.dirname(process.argv[3] || '/tmp/prices.xlsx'), 'mats_flag.xlsx'));
+  await page.waitForFunction(() => /mats_flag/.test(docOf('mats').files), null, {timeout: 10000});
+  console.log('mats flagged:', await page.evaluate(() => docOf('mats').lines.map(l => `${l.section}|${l.name}|${l.qty}|${lineSum(l)}`).join('; ') + ' sum=' + docSum(docOf('mats'))));
+  console.log('est total:', (await page.textContent('#estTotal')).replace(/\s+/g, ' '));
+  await page.screenshot({path: `${shots}/est_docs.png`, fullPage: true});
   // смета работ через ИИ (PDF)
   await page.setInputFiles('#fileWorks', pdfPath);
   await page.waitForFunction(() => docOf('works').lines.length === 4, null, {timeout: 20000});
