@@ -2,8 +2,12 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src https://openrouter.ai https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com https://api.deepseek.com; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Ремонт">
+<meta name="theme-color" content="#2f6fde">
+<!--__SITEHEAD__-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src https://openrouter.ai https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com https://api.deepseek.com; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data: blob:; manifest-src 'self'; worker-src 'self'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Ремонт: план и смета</title>
 <style>
 :root{
@@ -923,6 +927,8 @@ function loadDemo(){
 /* ================= Старт ================= */
 function renderAll(){ $("#pname").value = P.name || ""; renderRoomList(); renderEditor(); vb = null; renderView(); if ($("#pageEst").classList.contains("on")) renderEstimate(); if ($("#pageDB").classList.contains("on")) renderDB(); if ($("#pageClient").classList.contains("on")) renderClient(); if ($("#pageChat").classList.contains("on")) renderChat(); renderRecReport(); }
 renderAll();
+// на сайте — работа без интернета и установка на телефон (из файла на диске не используется)
+if (/^https?:$/.test(location.protocol) && "serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
 </script>
 </body>
 </html>

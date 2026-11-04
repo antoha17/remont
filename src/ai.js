@@ -2,13 +2,13 @@
 /* Страница обращается только к выбранному сервису ИИ (список адресов — в CSP в шапке).
    Ключ хранится только в этом браузере и не попадает в файл объекта. */
 const AI_PRESETS = {
+  openai:     {label: "OpenAI — ChatGPT", url: "https://api.openai.com/v1", site: "platform.openai.com/api-keys", model: "gpt-5.4-mini", noMax: true},
   openrouter: {label: "OpenRouter — много моделей по одному ключу", url: "https://openrouter.ai/api/v1", site: "openrouter.ai/keys"},
   anthropic:  {label: "Anthropic — Claude", url: "https://api.anthropic.com/v1", fmt: "anthropic", site: "console.anthropic.com"},
-  openai:     {label: "OpenAI — ChatGPT", url: "https://api.openai.com/v1", site: "platform.openai.com/api-keys"},
   gemini:     {label: "Google — Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai", site: "aistudio.google.com/apikey"},
   deepseek:   {label: "DeepSeek (не умеет читать фото и PDF)", url: "https://api.deepseek.com/v1", noVision: true, site: "platform.deepseek.com"},
 };
-const aiCfg = () => Object.assign({preset: "openrouter", key: "", model: ""}, load("remont.ai") || {});
+const aiCfg = () => Object.assign({preset: "openai", key: "", model: "gpt-5.4-mini"}, load("remont.ai") || {});
 const aiReady = () => { const c = aiCfg(); return !!(c.key && c.model && AI_PRESETS[c.preset]); };
 let aiModels = []; // список моделей, полученный от сервиса
 
@@ -48,7 +48,8 @@ async function callAI({system = "", messages, signal, maxTokens = 8000}){
   const content = parts => parts.some(x => x.image) ? parts.map(x => x.image ? {type: "image_url", image_url: {url: x.image}} : {type: "text", text: x.text}) : parts.map(x => x.text).join("\n");
   const msgs = (system ? [{role: "system", content: system}] : []).concat(messages.map(m => ({role: m.role, content: content(m.parts)})));
   r = await fetch(p.url + "/chat/completions", {method: "POST", signal, headers: aiHeaders(c),
-    body: JSON.stringify({model: c.model.trim(), messages: msgs, max_tokens: maxTokens})});
+    // у новых моделей OpenAI (GPT-5 и новее) параметр max_tokens запрещён, а лимит включает «размышления» — не ограничиваем
+    body: JSON.stringify(p.noMax ? {model: c.model.trim(), messages: msgs} : {model: c.model.trim(), messages: msgs, max_tokens: maxTokens})});
   j = await r.json().catch(() => ({}));
   if (!r.ok) throw {http: r.status, message: j.error?.message || (typeof j.error === "string" ? j.error : "")};
   const msg = j.choices?.[0]?.message?.content;
@@ -90,14 +91,14 @@ function renderAISettings(){
     <div class="row" style="margin-top:12px"><button class="primary" id="aiSave">Сохранить</button><button id="aiTest">Проверить связь</button></div>
     <div id="aiNote">${aiNote}</div>
     <div class="muted" style="font-size:12px;margin-top:10px">Ключ получают на сайте сервиса (${esc(p.site)}) и пополняют там счёт. Ключ хранится только в этом браузере на этом устройстве
-    и не попадает в файл объекта. Для распознавания схем и смет нужна модель, которая читает фото: Claude, GPT-4o/GPT-5, Gemini.
+    и не попадает в файл объекта. Для распознавания схем и смет нужна модель, которая читает фото: например gpt-5.4-mini, Claude, Gemini.
     При работе с ИИ фото, PDF и данные объекта отправляются выбранному сервису.</div>`;
 }
 $("#btnAI").onclick = openAI;
 document.addEventListener("click", e => { const b = e.target.closest("[data-close]"); if (b) $("#" + b.dataset.close).classList.remove("on"); });
 for (const id of ["aiModal", "recModal"]) $("#" + id).addEventListener("click", e => { if (e.target.id === id) e.target.classList.remove("on"); });
 $("#aiBody").addEventListener("input", e => { if (e.target.id === "aiKey") aiDraft.key = e.target.value; if (e.target.id === "aiModel") aiDraft.model = e.target.value; });
-$("#aiBody").addEventListener("change", e => { if (e.target.id === "aiPreset") { aiDraft.preset = e.target.value; aiDraft.model = ""; aiNote = ""; renderAISettings(); } });
+$("#aiBody").addEventListener("change", e => { if (e.target.id === "aiPreset") { aiDraft.preset = e.target.value; aiDraft.model = AI_PRESETS[e.target.value].model || ""; aiNote = ""; renderAISettings(); } });
 $("#aiBody").addEventListener("click", async e => {
   const id = e.target.id, c = aiDraft;
   if (id === "aiSave") { store("remont.ai", c); aiNote = `<div class="okbox">Сохранено.</div>`; renderAISettings(); renderChat(); }
