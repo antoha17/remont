@@ -17,7 +17,9 @@
 - Честно: «проверено» — только если реально проверено. Вопросы — пронумерованные.
 
 ## Ограничения
-- Один HTML-файл, полностью офлайн: никаких сетевых запросов и CDN; библиотеки встроены (SheetJS, three.js).
+- Один HTML-файл; библиотеки встроены (SheetJS, three.js, pdf.js), CDN не использовать.
+- Сеть — ТОЛЬКО к выбранному сервису ИИ (OpenRouter, Anthropic, OpenAI, Gemini, DeepSeek); список адресов — в CSP
+  (`connect-src`). Без ИИ всё остальное работает офлайн. Ключ ИИ хранится только в браузере, в файл объекта не попадает.
 - Цены — только из Excel пользователя, ничего не искать в интернете.
 - Не класть в репозиторий реальные данные клиентов/объектов. Тестовые данные — выдуманные.
 
@@ -26,6 +28,7 @@
 python3 scripts/build.py                      # → dist/Ремонт_смета.html и .zip
 python3 scripts/make_test_prices.py /tmp/prices.xlsx
 LANG=C.UTF-8 LC_ALL=C.UTF-8 node scripts/smoke.js /tmp/prices.xlsx /tmp/rshots
+LANG=C.UTF-8 LC_ALL=C.UTF-8 node scripts/smoke_ai.js /tmp/rshots   # ИИ-функции на подставных ответах
 ```
 Ожидается: `errors: []`, `network requests: []`, ширина 390 без горизонтальной прокрутки.
 Отдавать пользователю оба файла: `dist/Ремонт_смета.html` и `dist/Ремонт_смета.zip`.
