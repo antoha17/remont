@@ -1,0 +1,863 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Ремонт: план и смета</title>
+<style>
+:root{
+  --bg:#f4f5f7; --panel:#fff; --ink:#1d2433; --muted:#667085; --line:#d9dde5; --accent:#2f6fde; --accent-soft:#e8f0fd;
+  --ok:#1a7f4b; --warn:#b54708; --bad:#c62828; --floor:#f3ead9; --room:#e9f1ff; --room-sel:#cfe0ff;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.4 "Segoe UI",Roboto,Arial,sans-serif}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 12px}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.small{padding:3px 8px;font-size:13px}
+button.danger{color:var(--bad)}
+button.icon{padding:3px 8px;line-height:1}
+input,select{border:1px solid var(--line);border-radius:6px;padding:5px 7px;background:#fff;min-width:0}
+input:focus,select:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+input.num{width:80px;text-align:right}
+header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+header .logo{font-weight:700;font-size:16px;margin-right:4px}
+header input.pname{flex:1 1 200px;font-weight:600}
+nav.tabs{display:flex;gap:4px;padding:8px 16px 0;flex-wrap:wrap}
+nav.tabs button{border-radius:8px 8px 0 0;border-bottom:none;background:#eceef2}
+nav.tabs button.on{background:var(--panel);font-weight:600;border-color:var(--line)}
+main{padding:0 16px 24px}
+.page{min-width:0;display:none;background:var(--panel);border:1px solid var(--line);border-radius:0 10px 10px 10px;padding:14px}
+.page.on{display:block}
+.grid2{display:grid;grid-template-columns:minmax(320px,430px) 1fr;gap:14px;align-items:start}
+@media (max-width:900px){.grid2{grid-template-columns:1fr}.viewcol{order:-1}}
+.grid2>*{min-width:0}
+h2{font-size:16px;margin:0 0 8px}
+h3{font-size:14px;margin:14px 0 6px}
+.muted{color:var(--muted)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.roomlist{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.roomlist button.on{background:var(--accent-soft);border-color:var(--accent);font-weight:600}
+.box{border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:10px}
+.fields{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center}
+.fields label{color:var(--muted)}
+table{border-collapse:collapse;width:100%}
+th,td{padding:5px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+th{font-weight:600;color:var(--muted);font-size:12px;white-space:nowrap}
+td.r,th.r{text-align:right}
+.scrollx{overflow-x:auto;max-width:100%}
+.metrics{display:grid;grid-template-columns:1fr auto;gap:2px 12px;font-size:13px}
+.metrics b{text-align:right;font-variant-numeric:tabular-nums}
+.warn{color:var(--warn)}
+.bad{color:var(--bad)}
+.view{position:relative;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fbfcfe;height:min(68vh,620px);min-height:320px}
+.view svg{width:100%;height:100%;display:block;touch-action:none;user-select:none}
+.view canvas{width:100%!important;height:100%!important;display:block;touch-action:none}
+.viewbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:none;border-radius:0}
+.seg button.on{background:var(--accent);color:#fff}
+.hint{position:absolute;left:8px;bottom:6px;font-size:12px;color:var(--muted);background:rgba(255,255,255,.85);padding:2px 6px;border-radius:6px;pointer-events:none}
+.zoombtns{position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:4px}
+.zoombtns button{width:34px;height:34px;padding:0;background:rgba(255,255,255,.95)}
+.estroom{margin-bottom:16px}
+.estroom h3{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:6px}
+.est td input.num{width:70px}
+.est td select{max-width:190px}
+.total{font-size:18px;font-weight:700;text-align:right;margin:10px 0}
+.modal{position:fixed;inset:0;background:rgba(20,25,35,.45);display:none;align-items:flex-start;justify-content:center;z-index:20;padding:5vh 12px}
+.modal.on{display:flex}
+.modal .card{background:#fff;border-radius:12px;width:min(760px,100%);max-height:88vh;display:flex;flex-direction:column;overflow:hidden}
+.modal .card .head{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center}
+.modal .card .body{overflow:auto;padding:6px 14px 14px}
+.matrow{cursor:pointer}
+.matrow:hover{background:var(--accent-soft)}
+.pill{display:inline-block;padding:1px 8px;border-radius:10px;background:#eef0f4;color:var(--muted);font-size:12px}
+.empty{padding:20px;text-align:center;color:var(--muted)}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#1d2433;color:#fff;padding:8px 14px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:30;max-width:90vw}
+.toast.on{opacity:1}
+@media print{
+  header,nav.tabs,.noprint,#pagePlan,#pageDB{display:none!important}
+  main{padding:0}.page{border:none;display:block!important;padding:0}
+  .est input,.est select{border:none;padding:0;background:none;appearance:none}
+}
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">🏠 Ремонт</span>
+  <input class="pname" id="pname" placeholder="Название объекта (адрес, заказчик)">
+  <button id="btnNew">Новый объект</button>
+  <button id="btnOpen">Открыть объект…</button>
+  <button id="btnSave">Сохранить в файл</button>
+  <button id="btnDemo" title="Загрузить выдуманный пример квартиры и прайса">Пример</button>
+  <input type="file" id="fileProject" accept=".json,.remont" hidden>
+</header>
+<nav class="tabs">
+  <button data-tab="Plan" class="on">1. План и замеры</button>
+  <button data-tab="Est">2. Смета</button>
+  <button data-tab="DB">3. База материалов</button>
+</nav>
+<main>
+<section class="page on" id="pagePlan">
+  <div class="grid2">
+    <div>
+      <div class="row" style="justify-content:space-between;margin-bottom:6px">
+        <h2 style="margin:0">Комнаты</h2>
+        <button class="primary small" id="btnAddRoom">+ Комната</button>
+      </div>
+      <div class="roomlist" id="roomList"></div>
+      <div id="editor"></div>
+    </div>
+    <div class="viewcol">
+      <div class="viewbar">
+        <div class="seg"><button data-mode="2d" class="on">План сверху</button><button data-mode="3d">3D</button></div>
+        <div class="seg"><button data-scope="all" class="on">Весь объект</button><button data-scope="one">Только комната</button></div>
+        <label class="row" id="lowWallsWrap" style="gap:4px;display:none"><input type="checkbox" id="lowWalls"> низкие стены</label>
+      </div>
+      <div class="view" id="view"></div>
+      <div class="muted" style="font-size:12px;margin-top:6px" id="viewHelp"></div>
+    </div>
+  </div>
+</section>
+
+<section class="page" id="pageEst">
+  <div class="row noprint" style="justify-content:space-between;margin-bottom:8px">
+    <h2 style="margin:0">Смета по объекту</h2>
+    <div class="row">
+      <button id="btnRefreshPrices" title="Подставить цены из загруженной базы">Обновить цены по базе</button>
+      <button id="btnExport">Скачать смету в Excel</button>
+      <button id="btnPrint">Печать</button>
+    </div>
+  </div>
+  <div class="muted noprint" style="margin-bottom:10px">Материал добавляется в комнату из базы. Количество считается само: <b>основа</b> (например, площадь пола) × <b>расход на 1 ед.</b> + <b>запас %</b>, затем делится на <b>фасовку</b> и округляется вверх.</div>
+  <div id="estimate"></div>
+</section>
+
+<section class="page" id="pageDB">
+  <div class="row" style="justify-content:space-between;margin-bottom:8px">
+    <h2 style="margin:0">База материалов и цен</h2>
+    <div class="row">
+      <button class="primary" id="btnLoadDB">Загрузить Excel с ценами…</button>
+      <button id="btnTemplate">Скачать образец таблицы</button>
+      <button class="danger" id="btnClearDB">Очистить базу</button>
+      <input type="file" id="fileDB" accept=".xlsx,.xls,.xlsm,.csv" hidden>
+    </div>
+  </div>
+  <div class="muted" id="dbInfo" style="margin-bottom:8px"></div>
+  <details style="margin-bottom:10px"><summary>Какие колонки нужны в Excel</summary>
+    <div class="muted" style="margin-top:6px">Обязательно: <b>Наименование</b>, <b>Цена</b>. Желательно: <b>Ед. изм.</b>, <b>Категория</b>.
+    По желанию: <b>Расход</b> (сколько единиц уходит на 1 м² или 1 м.п.), <b>Фасовка</b> (сколько в одной упаковке),
+    <b>Считать по</b> (пол / стены / потолок / периметр / плинтус / откосы / шт), <b>Артикул</b>.
+    Названия колонок можно писать по-своему — программа ищет по смыслу. Если в файле несколько листов, загружаются все; название листа становится категорией, если колонки «Категория» нет.
+    Цены берутся только из вашего файла — программа ничего не ищет в интернете.</div>
+  </details>
+  <input id="dbSearch" placeholder="Поиск по базе: например «ламинат 33» или «шпаклёвка»" style="width:100%;margin-bottom:8px">
+  <div class="scrollx" id="dbTable"></div>
+</section>
+</main>
+
+<div class="modal" id="picker">
+  <div class="card">
+    <div class="head">
+      <input id="pickSearch" placeholder="Поиск материала…" style="flex:1">
+      <button id="pickClose">Закрыть</button>
+    </div>
+    <div class="body">
+      <div class="muted" id="pickTarget" style="margin:6px 0"></div>
+      <div id="pickList"></div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>/*__XLSX__*/</script>
+<script>/*__THREE__*/</script>
+<script>
+"use strict";
+/* ================= Утилиты ================= */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const num = v => { if (typeof v === "number") return isFinite(v) ? v : 0; const n = parseFloat(String(v ?? "").replace(/\s/g,"").replace(",", ".")); return isFinite(n) ? n : 0; };
+const r2 = v => Math.round(v * 100) / 100;
+const fmt = (v, d = 2) => (Math.round(v * 10 ** d) / 10 ** d).toLocaleString("ru-RU", {maximumFractionDigits: d});
+const money = v => v.toLocaleString("ru-RU", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " ₽";
+const uid = () => Math.random().toString(36).slice(2, 10);
+const norm = s => String(s ?? "").toLowerCase().replace(/ё/g, "е").replace(/\s+/g, " ").trim();
+function toast(msg){ const t = $("#toast"); t.textContent = msg; t.classList.add("on"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("on"), 2600); }
+function store(key, val){ try { localStorage.setItem(key, JSON.stringify(val)); } catch(e){ /* хранилище недоступно — работаем без автосохранения */ } }
+function load(key){ try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : null; } catch(e){ return null; } }
+function download(name, blob){ const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); }
+
+/* ================= Данные ================= */
+const DIRS = {R:[1,0], D:[0,1], L:[-1,0], U:[0,-1]};
+const DIR_NAMES = {R:"→ вправо", D:"↓ вниз", L:"← влево", U:"↑ вверх"};
+const OPEN_TYPES = {door:"Дверь", window:"Окно", arch:"Проём (без двери)"};
+const BASES = {
+  floor:["Пол","м²"], ceiling:["Потолок","м²"], walls:["Стены за вычетом проёмов","м²"], wallsGross:["Стены без вычета","м²"],
+  perim:["Периметр","м.п."], plinth:["Плинтус (периметр без дверей)","м.п."], slopesWin:["Откосы окон","м.п."], slopesDoor:["Откосы дверей","м.п."],
+  windows:["Окна","шт"], doors:["Двери","шт"], volume:["Объём","м³"], custom:["Своё количество",""]
+};
+
+function newRoom(name, L = 4, W = 3){
+  return {id: uid(), name, x: 0, y: 0, h: 2.7, shape: "rect", L, W, walls: rectWalls(L, W), openings: [], items: []};
+}
+function rectWalls(L, W){ return [{dir:"R",len:L},{dir:"D",len:W},{dir:"L",len:L},{dir:"U",len:W}]; }
+function newProject(){ return {name: "", rooms: [], common: [], v: 1}; }
+
+let P = load("remont.project.v1") || newProject();
+let DB = load("remont.materials.v1") || {items: [], file: "", loaded: ""};
+let sel = P.rooms[0]?.id || null;
+let viewMode = "2d", viewScope = "all";
+const save = () => store("remont.project.v1", P);
+const saveDB = () => store("remont.materials.v1", DB);
+const room = id => P.rooms.find(r => r.id === id);
+
+/* ================= Геометрия ================= */
+function wallsOf(r){ return r.shape === "rect" ? rectWalls(num(r.L), num(r.W)) : r.walls; }
+function points(r){
+  const pts = [[0,0]]; let x = 0, y = 0;
+  for (const w of wallsOf(r)) { const d = DIRS[w.dir] || DIRS.R; x += d[0] * num(w.len); y += d[1] * num(w.len); pts.push([x, y]); }
+  return pts; // последняя точка должна совпасть с первой
+}
+function segs(r){
+  const p = points(r), out = [];
+  for (let i = 0; i < p.length - 1; i++) {
+    const [x0,y0] = p[i], [x1,y1] = p[i+1], len = Math.hypot(x1-x0, y1-y0);
+    out.push({x0, y0, x1, y1, len, ux: len ? (x1-x0)/len : 1, uy: len ? (y1-y0)/len : 0});
+  }
+  return out;
+}
+function gap(r){ const p = points(r), l = p[p.length-1]; return {dx: -l[0], dy: -l[1], d: Math.hypot(l[0], l[1])}; }
+function polyArea(p){ let a = 0; for (let i = 0; i < p.length - 1; i++) a += p[i][0]*p[i+1][1] - p[i+1][0]*p[i][1]; return Math.abs(a) / 2; }
+function inside(pt, p){
+  let c = false;
+  for (let i = 0, j = p.length - 2; i < p.length - 1; j = i++) {
+    const [xi,yi] = p[i], [xj,yj] = p[j];
+    if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < (xj-xi)*(pt[1]-yi)/(yj-yi) + xi) c = !c;
+  }
+  return c;
+}
+function inward(r, s){ // единичная нормаль внутрь комнаты
+  const p = points(r), mx = (s.x0+s.x1)/2, my = (s.y0+s.y1)/2, nx = -s.uy, ny = s.ux, e = 0.05;
+  return inside([mx + nx*e, my + ny*e], p) ? [nx, ny] : [-nx, -ny];
+}
+function bbox(r){ const p = points(r); const xs = p.map(q => q[0]), ys = p.map(q => q[1]); return {x0: r.x + Math.min(...xs), y0: r.y + Math.min(...ys), x1: r.x + Math.max(...xs), y1: r.y + Math.max(...ys)}; }
+
+function metrics(r){
+  const p = points(r), S = segs(r), h = num(r.h);
+  const area = polyArea(p), perim = S.reduce((a, s) => a + s.len, 0);
+  let openArea = 0, doorW = 0, slopesWin = 0, slopesDoor = 0, windows = 0, doors = 0;
+  for (const o of r.openings) {
+    const w = num(o.w), oh = num(o.h);
+    openArea += w * oh;
+    if (o.type === "window") { windows++; slopesWin += 2*oh + w; }
+    else { doorW += w; slopesDoor += 2*oh + w; if (o.type === "door") doors++; }
+  }
+  return {floor: area, ceiling: area, perim, wallsGross: perim*h, walls: Math.max(0, perim*h - openArea),
+          plinth: Math.max(0, perim - doorW), slopesWin, slopesDoor, windows, doors, volume: area*h, openArea};
+}
+function totalMetrics(){
+  const t = {}; for (const k of Object.keys(BASES)) t[k] = 0;
+  for (const r of P.rooms) { const m = metrics(r); for (const k in t) t[k] += m[k] || 0; }
+  return t;
+}
+
+/* ================= Расчёт позиции сметы ================= */
+function itemCalc(it, m){
+  const base = it.base === "custom" ? num(it.custom) : (m[it.base] || 0);
+  const need = base * num(it.rate) * (1 + num(it.reserve) / 100);
+  const pack = num(it.pack);
+  let qty;
+  if (pack > 0) qty = Math.ceil(need / pack - 1e-9);
+  else if (it.whole) qty = Math.ceil(need - 1e-9);
+  else qty = r2(need);
+  return {base, need, qty, sum: r2(qty * num(it.price))};
+}
+const WHOLE_UNITS = /шт|уп|меш|рул|лист|бан|ведр|кор|пач|бух|канист|тюб|флак|компл|пар/i;
+function guessBase(unit){
+  const u = norm(unit);
+  if (/м2|м²|кв/.test(u)) return "floor";
+  if (/м\.?п|пог|^м$|метр/.test(u)) return "perim";
+  if (/м3|м³|куб/.test(u)) return "volume";
+  return "custom";
+}
+function parseBaseWord(s){
+  const u = norm(s); if (!u) return "";
+  if (/вычет|чист/.test(u) && /стен/.test(u)) return "walls";
+  if (/стен/.test(u)) return "walls";
+  if (/пол/.test(u) && !/потол/.test(u)) return "floor";
+  if (/потол/.test(u)) return "ceiling";
+  if (/плинт/.test(u)) return "plinth";
+  if (/периметр|галтел/.test(u)) return "perim";
+  if (/откос/.test(u) && /двер/.test(u)) return "slopesDoor";
+  if (/откос/.test(u)) return "slopesWin";
+  if (/окн/.test(u)) return "windows";
+  if (/двер/.test(u)) return "doors";
+  if (/объем|объём/.test(u)) return "volume";
+  if (/шт|вручн|сво/.test(u)) return "custom";
+  return "";
+}
+function itemFromMat(mat){
+  const base = mat.base || guessBase(mat.unit);
+  return {id: uid(), name: mat.name, unit: mat.unit, price: mat.price, cat: mat.cat || "", code: mat.code || "",
+          base, custom: base === "custom" ? 1 : "", rate: mat.rate || 1, pack: mat.pack || "", reserve: base === "custom" ? 0 : 10,
+          whole: WHOLE_UNITS.test(mat.unit || "")};
+}
+
+/* ================= Вкладки и шапка ================= */
+document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav.tabs button").forEach(x => x.classList.toggle("on", x === b));
+  document.querySelectorAll(".page").forEach(p => p.classList.toggle("on", p.id === "page" + b.dataset.tab));
+  if (b.dataset.tab === "Est") renderEstimate();
+  if (b.dataset.tab === "DB") renderDB();
+  if (b.dataset.tab === "Plan") renderView();
+});
+$("#pname").oninput = e => { P.name = e.target.value; save(); };
+$("#btnNew").onclick = () => {
+  if (P.rooms.length && !confirm("Начать новый объект? Текущий лучше сначала сохранить в файл.")) return;
+  P = newProject(); sel = null; save(); renderAll();
+};
+$("#btnSave").onclick = () => {
+  const name = (P.name || "объект").replace(/[\\/:*?"<>|]+/g, "_").slice(0, 80);
+  download(name + ".remont.json", new Blob([JSON.stringify(P, null, 1)], {type: "application/json"}));
+};
+$("#btnOpen").onclick = () => $("#fileProject").click();
+$("#fileProject").onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+  try { const d = JSON.parse(await f.text()); if (!Array.isArray(d.rooms)) throw 0; d.common = d.common || []; P = d; sel = P.rooms[0]?.id || null; save(); renderAll(); toast("Объект открыт: " + (P.name || f.name)); }
+  catch(err){ alert("Это не файл объекта (.remont.json)."); }
+};
+$("#btnDemo").onclick = () => {
+  if (P.rooms.length && !confirm("Заменить текущий объект примером? Текущий лучше сначала сохранить в файл.")) return;
+  loadDemo(); renderAll(); toast("Загружен выдуманный пример");
+};
+
+/* ================= Список комнат и редактор ================= */
+$("#btnAddRoom").onclick = () => {
+  const r = newRoom("Комната " + (P.rooms.length + 1));
+  // ставим справа от уже существующих
+  if (P.rooms.length) { const bx = Math.max(...P.rooms.map(q => bbox(q).x1)); r.x = r2(bx); r.y = Math.min(...P.rooms.map(q => bbox(q).y0)); }
+  P.rooms.push(r); sel = r.id; save(); renderAll();
+};
+function renderRoomList(){
+  $("#roomList").innerHTML = P.rooms.length ? P.rooms.map(r => `<button data-room="${r.id}" class="${r.id === sel ? "on" : ""}">${esc(r.name || "Без названия")} <span class="muted">${fmt(metrics(r).floor,1)} м²</span></button>`).join("")
+    : `<div class="muted">Пока нет комнат. Нажмите «+ Комната» или «Пример».</div>`;
+}
+$("#roomList").onclick = e => { const b = e.target.closest("[data-room]"); if (b) { sel = b.dataset.room; renderAll(); } };
+
+function renderEditor(){
+  const r = room(sel), el = $("#editor");
+  if (!r) { el.innerHTML = ""; return; }
+  const S = segs(r);
+  const wallOpts = i => S.map((s, k) => `<option value="${k}" ${k == i ? "selected" : ""}>${k+1}</option>`).join("");
+  el.innerHTML = `
+  <div class="box">
+    <div class="fields">
+      <label>Название</label><input data-f="name" value="${esc(r.name)}">
+      <label>Высота потолка, м</label><input class="num" data-f="h" value="${r.h}" inputmode="decimal">
+      <label>Форма</label>
+      <select data-f="shape"><option value="rect" ${r.shape==="rect"?"selected":""}>Прямоугольник</option><option value="poly" ${r.shape==="poly"?"selected":""}>Сложная (по стенам)</option></select>
+      ${r.shape === "rect" ? `
+      <label>Длина, м</label><input class="num" data-f="L" value="${r.L}" inputmode="decimal">
+      <label>Ширина, м</label><input class="num" data-f="W" value="${r.W}" inputmode="decimal">` : ""}
+    </div>
+    ${r.shape === "poly" ? `
+    <h3>Стены по контуру (по часовой стрелке)</h3>
+    <div class="muted" style="font-size:12px;margin-bottom:4px">Обходите комнату от угла: укажите направление и длину каждой стены. Для Г-образной комнаты — 6 стен.</div>
+    <table><tr><th>№</th><th>Направление</th><th class="r">Длина, м</th><th></th></tr>
+    ${r.walls.map((w, i) => `<tr><td>${i+1}</td><td><select data-wall="${i}" data-k="dir">${Object.entries(DIR_NAMES).map(([k,v]) => `<option value="${k}" ${w.dir===k?"selected":""}>${v}</option>`).join("")}</select></td>
+      <td class="r"><input class="num" data-wall="${i}" data-k="len" value="${w.len}" inputmode="decimal"></td>
+      <td><button class="icon danger" data-delwall="${i}" title="Удалить стену">✕</button></td></tr>`).join("")}
+    </table>
+    <div class="row" style="margin-top:6px"><button class="small" id="addWall">+ Стена</button><button class="small" id="closeWall">Замкнуть контур</button><span id="gapInfo"></span></div>` : ""}
+  </div>
+  <div class="box">
+    <div class="row" style="justify-content:space-between"><b>Двери и окна</b>
+      <span class="row"><button class="small" data-addopen="door">+ Дверь</button><button class="small" data-addopen="window">+ Окно</button><button class="small" data-addopen="arch">+ Проём</button></span></div>
+    ${r.openings.length ? `<div class="scrollx"><table style="margin-top:6px"><tr><th>Тип</th><th>Стена</th><th class="r">Отступ, м</th><th class="r">Ширина</th><th class="r">Высота</th><th class="r">От пола</th><th></th></tr>
+    ${r.openings.map((o, i) => `<tr>
+      <td><select data-open="${i}" data-k="type">${Object.entries(OPEN_TYPES).map(([k,v]) => `<option value="${k}" ${o.type===k?"selected":""}>${v}</option>`).join("")}</select></td>
+      <td><select data-open="${i}" data-k="wall">${wallOpts(o.wall)}</select></td>
+      <td class="r"><input class="num" style="width:62px" data-open="${i}" data-k="pos" value="${o.pos}" inputmode="decimal"></td>
+      <td class="r"><input class="num" style="width:58px" data-open="${i}" data-k="w" value="${o.w}" inputmode="decimal"></td>
+      <td class="r"><input class="num" style="width:58px" data-open="${i}" data-k="h" value="${o.h}" inputmode="decimal"></td>
+      <td class="r"><input class="num" style="width:58px" data-open="${i}" data-k="sill" value="${o.sill}" inputmode="decimal"></td>
+      <td><button class="icon danger" data-delopen="${i}">✕</button></td></tr>`).join("")}</table></div>
+      <div class="muted" style="font-size:12px">Номер стены виден на плане. Отступ — от начала стены (по часовой стрелке) до края проёма.</div>` : `<div class="muted" style="margin-top:4px">Нет проёмов.</div>`}
+  </div>
+  <div class="box"><b>Расчёт по комнате</b><div class="metrics" id="metrics" style="margin-top:6px"></div></div>
+  <div class="row"><button class="small" id="dupRoom">Копировать комнату</button><button class="small danger" id="delRoom">Удалить комнату</button></div>`;
+  renderMetrics();
+}
+function renderMetrics(){
+  const r = room(sel); if (!r) return;
+  const m = metrics(r), g = gap(r);
+  const el = $("#metrics");
+  if (el) el.innerHTML = [
+    ["Площадь пола", fmt(m.floor) + " м²"], ["Площадь потолка", fmt(m.ceiling) + " м²"],
+    ["Стены без вычета", fmt(m.wallsGross) + " м²"], ["Стены за вычетом проёмов", fmt(m.walls) + " м²"],
+    ["Периметр", fmt(m.perim) + " м"], ["Плинтус (без дверей)", fmt(m.plinth) + " м"],
+    ["Откосы окон / дверей", fmt(m.slopesWin) + " / " + fmt(m.slopesDoor) + " м"], ["Объём", fmt(m.volume) + " м³"]
+  ].map(([a,b]) => `<span>${a}</span><b>${b}</b>`).join("");
+  const gi = $("#gapInfo");
+  if (gi) gi.innerHTML = g.d < 0.005 ? `<span style="color:var(--ok)">контур замкнут ✓</span>`
+    : `<span class="warn">не замкнут: не хватает ${fmt(Math.abs(g.dx))} м ${g.dx >= 0 ? "вправо" : "влево"}, ${fmt(Math.abs(g.dy))} м ${g.dy >= 0 ? "вниз" : "вверх"}</span>`;
+}
+
+$("#editor").addEventListener("input", e => {
+  const r = room(sel); if (!r) return; const t = e.target;
+  if (t.dataset.f && t.dataset.f !== "shape") {
+    r[t.dataset.f] = t.dataset.f === "name" ? t.value : t.value.replace(",", ".");
+    if (t.dataset.f === "name") renderRoomList();
+  } else if (t.dataset.wall !== undefined && t.dataset.k === "len") {
+    r.walls[+t.dataset.wall].len = t.value.replace(",", ".");
+  } else if (t.dataset.open !== undefined && t.tagName === "INPUT") {
+    r.openings[+t.dataset.open][t.dataset.k] = t.value.replace(",", ".");
+  } else return;
+  save(); renderMetrics(); renderView(); if (t.dataset.f !== "name") renderRoomList();
+});
+$("#editor").addEventListener("change", e => {
+  const r = room(sel); if (!r) return; const t = e.target;
+  if (t.dataset.f === "shape") {
+    if (t.value === "poly" && r.shape === "rect") r.walls = rectWalls(num(r.L), num(r.W));
+    if (t.value === "rect" && r.shape === "poly") { const b = bbox(r); r.L = r2(b.x1 - b.x0); r.W = r2(b.y1 - b.y0); }
+    r.shape = t.value;
+  } else if (t.dataset.wall !== undefined && t.dataset.k === "dir") r.walls[+t.dataset.wall].dir = t.value;
+  else if (t.dataset.open !== undefined && t.tagName === "SELECT") {
+    const o = r.openings[+t.dataset.open]; o[t.dataset.k] = t.dataset.k === "wall" ? +t.value : t.value;
+    if (t.dataset.k === "type") Object.assign(o, openDefaults(t.value, o.w));
+  } else return;
+  save(); renderAll();
+});
+function openDefaults(type){ return type === "window" ? {w: 1.2, h: 1.4, sill: 0.8} : type === "door" ? {w: 0.8, h: 2.0, sill: 0} : {w: 0.9, h: 2.1, sill: 0}; }
+$("#editor").addEventListener("click", e => {
+  const r = room(sel); if (!r) return; const t = e.target.closest("button"); if (!t) return;
+  if (t.id === "addWall") r.walls.push({dir: "R", len: 1});
+  else if (t.id === "closeWall") {
+    const g = gap(r);
+    if (g.d < 0.005) { toast("Контур уже замкнут"); return; }
+    if (Math.abs(g.dx) > 0.005) r.walls.push({dir: g.dx > 0 ? "R" : "L", len: r2(Math.abs(g.dx))});
+    if (Math.abs(g.dy) > 0.005) r.walls.push({dir: g.dy > 0 ? "D" : "U", len: r2(Math.abs(g.dy))});
+  }
+  else if (t.dataset.delwall !== undefined) { if (r.walls.length <= 3) return toast("Нужно хотя бы 3 стены"); r.walls.splice(+t.dataset.delwall, 1); r.openings = r.openings.filter(o => o.wall < r.walls.length); }
+  else if (t.dataset.addopen) {
+    const S = segs(r), d = openDefaults(t.dataset.addopen), wi = t.dataset.addopen === "window" ? 0 : Math.min(2, S.length - 1);
+    r.openings.push({id: uid(), type: t.dataset.addopen, wall: wi, pos: r2(Math.max(0, (S[wi].len - d.w) / 2)), ...d});
+  }
+  else if (t.dataset.delopen !== undefined) r.openings.splice(+t.dataset.delopen, 1);
+  else if (t.id === "delRoom") { if (!confirm(`Удалить «${r.name}» вместе с её сметой?`)) return; P.rooms = P.rooms.filter(q => q !== r); sel = P.rooms[0]?.id || null; }
+  else if (t.id === "dupRoom") { const c = JSON.parse(JSON.stringify(r)); c.id = uid(); c.name = r.name + " (копия)"; c.x = r2(bbox(r).x1 + 0.5); c.openings.forEach(o => o.id = uid()); c.items.forEach(i => i.id = uid()); P.rooms.push(c); sel = c.id; }
+  else return;
+  save(); renderAll();
+});
+
+/* ================= План сверху (SVG) ================= */
+let vb = null; // область просмотра в метрах
+function fitBox(rooms){
+  if (!rooms.length) return {x: -1, y: -1, w: 8, h: 6};
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const r of rooms) { const b = bbox(r); x0 = Math.min(x0, b.x0); y0 = Math.min(y0, b.y0); x1 = Math.max(x1, b.x1); y1 = Math.max(y1, b.y1); }
+  const m = Math.max(1.2, (x1 - x0 + y1 - y0) * 0.12);
+  const el = $("#view"), ar = (el.clientWidth || 600) / (el.clientHeight || 400);
+  let w = x1 - x0 + 2*m, h = y1 - y0 + 2*m;
+  if (w / h < ar) w = h * ar; else h = w / ar;
+  return {x: (x0 + x1)/2 - w/2, y: (y0 + y1)/2 - h/2, w, h};
+}
+function shownRooms(){ return viewScope === "one" && room(sel) ? [room(sel)] : P.rooms; }
+function render2D(){
+  const el = $("#view"), rooms = shownRooms();
+  if (!vb) vb = fitBox(rooms);
+  const fs = vb.w / 45, sw = vb.w / 500;
+  let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb.x} ${vb.y} ${vb.w} ${vb.h}" id="svg">
+    <defs><pattern id="g1" width="1" height="1" patternUnits="userSpaceOnUse"><path d="M1 0H0V1" fill="none" stroke="#e3e7ee" stroke-width="${sw}"/></pattern></defs>
+    <rect x="${vb.x}" y="${vb.y}" width="${vb.w}" height="${vb.h}" fill="url(#g1)" data-bg="1"/>`;
+  for (const r of rooms) {
+    const p = points(r).map(([x,y]) => [x + r.x, y + r.y]), S = segs(r), on = r.id === sel, m = metrics(r);
+    s += `<g data-room="${r.id}" style="cursor:move">
+      <polygon points="${p.slice(0, -1).map(q => q.join(",")).join(" ")}" fill="${on ? "var(--room-sel)" : "var(--room)"}" stroke="${on ? "var(--accent)" : "#44506a"}" stroke-width="${sw*(on?5:3.5)}" stroke-linejoin="round"/>`;
+    S.forEach((g, i) => {
+      const [nx, ny] = inward(r, g), mx = (g.x0+g.x1)/2 + r.x, my = (g.y0+g.y1)/2 + r.y;
+      const off = fs * 0.9, tx = mx - nx*off, ty = my - ny*off + fs*0.35, rot = Math.abs(g.ux) > 0.5 ? 0 : -90;
+      if (g.len > 0.01) s += `<text x="${tx}" y="${ty}" font-size="${fs}" text-anchor="middle" fill="#1d2433" transform="rotate(${rot} ${tx} ${ty - fs*0.35})">${fmt(g.len)}</text>`;
+      if (on) s += `<circle cx="${mx + nx*fs*0.9}" cy="${my + ny*fs*0.9}" r="${fs*0.55}" fill="#fff" stroke="var(--accent)" stroke-width="${sw*2}"/><text x="${mx + nx*fs*0.9}" y="${my + ny*fs*0.9 + fs*0.3}" font-size="${fs*0.75}" text-anchor="middle" fill="var(--accent)">${i+1}</text>`;
+    });
+    for (const o of r.openings) {
+      const g = S[o.wall]; if (!g) continue;
+      const [nx, ny] = inward(r, g), a = num(o.pos), b = a + num(o.w);
+      const ax = g.x0 + g.ux*a + r.x, ay = g.y0 + g.uy*a + r.y, bx = g.x0 + g.ux*b + r.x, by = g.y0 + g.uy*b + r.y;
+      s += `<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="#fff" stroke-width="${sw*7}"/>`;
+      if (o.type === "window") s += `<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="#3a8ee6" stroke-width="${sw*6}"/><line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="#fff" stroke-width="${sw*2}"/>`;
+      else if (o.type === "door") { const w = num(o.w), ex = ax + nx*w, ey = ay + ny*w, sweep = (g.ux*ny - g.uy*nx) > 0 ? 0 : 1;
+        s += `<line x1="${ax}" y1="${ay}" x2="${ex}" y2="${ey}" stroke="#8a5a2b" stroke-width="${sw*3}"/><path d="M${ex} ${ey} A${w} ${w} 0 0 ${sweep} ${bx} ${by}" fill="none" stroke="#8a5a2b" stroke-width="${sw*1.5}" stroke-dasharray="${sw*6} ${sw*4}"/>`; }
+      else s += `<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="#9aa3b5" stroke-width="${sw*2}" stroke-dasharray="${sw*5} ${sw*4}"/>`;
+    }
+    const c = labelPoint(r);
+    s += `<text x="${c[0]}" y="${c[1] - fs*0.2}" font-size="${fs*1.1}" font-weight="600" text-anchor="middle" fill="#1d2433">${esc(r.name)}</text>
+          <text x="${c[0]}" y="${c[1] + fs*1.0}" font-size="${fs*0.95}" text-anchor="middle" fill="#475069">${fmt(m.floor)} м²</text>`;
+    const g = gap(r); if (g.d >= 0.005) { const l = p[p.length-1]; s += `<circle cx="${l[0]}" cy="${l[1]}" r="${fs*0.4}" fill="var(--bad)"/>`; }
+    s += `</g>`;
+  }
+  s += `</svg><div class="zoombtns noprint"><button data-z="in" title="Приблизить">+</button><button data-z="out" title="Отдалить">−</button><button data-z="fit" title="Показать всё">⤢</button></div>
+    <div class="hint">${rooms.length ? "Тяните комнату, чтобы передвинуть · колесо/щипок — масштаб · тяните фон — сдвиг" : "Добавьте комнату"}</div>`;
+  el.innerHTML = s;
+}
+function labelPoint(r){ // точка внутри комнаты, максимально удалённая от стен
+  const p = points(r), b = bbox(r), S = segs(r); let best = null, bd = -1;
+  for (let i = 1; i < 24; i++) for (let j = 1; j < 24; j++) {
+    const q = [b.x0 - r.x + (b.x1 - b.x0)*i/24, b.y0 - r.y + (b.y1 - b.y0)*j/24]; if (!inside(q, p)) continue;
+    let d = Infinity; for (const g of S) { const t = Math.max(0, Math.min(g.len, (q[0]-g.x0)*g.ux + (q[1]-g.y0)*g.uy)); d = Math.min(d, Math.hypot(q[0] - g.x0 - g.ux*t, q[1] - g.y0 - g.uy*t)); }
+    if (d > bd) { bd = d; best = q; }
+  }
+  if (!best) best = [(b.x0 + b.x1)/2 - r.x, (b.y0 + b.y1)/2 - r.y];
+  return [best[0] + r.x, best[1] + r.y];
+}
+// перетаскивание комнат, сдвиг и масштаб
+const ptrs = new Map(); let drag = null;
+function svgPt(e){ const svg = $("#svg"); const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; return pt.matrixTransform(svg.getScreenCTM().inverse()); }
+function zoomAt(f, cx, cy){ if (!vb) return; const nw = Math.min(200, Math.max(1, vb.w * f)), k = nw / vb.w; vb = {x: cx - (cx - vb.x)*k, y: cy - (cy - vb.y)*k, w: nw, h: vb.h * k}; render2D(); }
+$("#view").addEventListener("pointerdown", e => {
+  if (viewMode !== "2d") return;
+  const z = e.target.closest("[data-z]");
+  if (z) { const cx = vb.x + vb.w/2, cy = vb.y + vb.h/2; if (z.dataset.z === "fit") { vb = fitBox(shownRooms()); render2D(); } else zoomAt(z.dataset.z === "in" ? 0.8 : 1.25, cx, cy); return; }
+  if (!$("#svg")) return;
+  ptrs.set(e.pointerId, {x: e.clientX, y: e.clientY});
+  $("#view").setPointerCapture(e.pointerId);
+  if (ptrs.size === 2) { drag = {pinch: true, d: dist2(), vb: {...vb}}; return; }
+  const g = e.target.closest("[data-room]"), p = svgPt(e);
+  if (g) { const r = room(g.dataset.room); if (sel !== r.id) { sel = r.id; renderRoomList(); renderEditor(); } drag = {room: r, sx: p.x, sy: p.y, ox: r.x, oy: r.y, moved: false}; render2D(); }
+  else drag = {pan: true, cx: e.clientX, cy: e.clientY, vb: {...vb}};
+});
+function dist2(){ const a = [...ptrs.values()]; return Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) || 1; }
+$("#view").addEventListener("pointermove", e => {
+  if (viewMode !== "2d" || !drag || !ptrs.has(e.pointerId)) return;
+  ptrs.set(e.pointerId, {x: e.clientX, y: e.clientY});
+  if (drag.pinch && ptrs.size === 2) { const f = drag.d / dist2(); const c = drag.vb; const nw = Math.min(200, Math.max(1, c.w * f)); vb = {x: c.x + (c.w - nw)/2, y: c.y + (c.h - c.h*nw/c.w)/2, w: nw, h: c.h * nw / c.w}; render2D(); return; }
+  if (drag.pan) { const el = $("#view"), k = drag.vb.w / el.clientWidth; vb = {...drag.vb, x: drag.vb.x - (e.clientX - drag.cx)*k, y: drag.vb.y - (e.clientY - drag.cy)*k}; render2D(); return; }
+  if (drag.room) {
+    const p = svgPt(e); let nx = drag.ox + p.x - drag.sx, ny = drag.oy + p.y - drag.sy;
+    [nx, ny] = snap(drag.room, nx, ny);
+    drag.room.x = nx; drag.room.y = ny; drag.moved = true; render2D();
+  }
+});
+function snap(r, nx, ny){
+  const own = bbox({...r, x: nx, y: ny}), tol = vb.w / 60;
+  let bx = Math.round(nx / 0.05) * 0.05, by = Math.round(ny / 0.05) * 0.05, best = [tol, tol];
+  for (const q of P.rooms) { if (q === r) continue; const b = bbox(q);
+    for (const [a, t] of [[own.x0, b.x1], [own.x1, b.x0], [own.x0, b.x0], [own.x1, b.x1]]) if (Math.abs(a - t) < best[0]) { best[0] = Math.abs(a - t); bx = nx + t - a; }
+    for (const [a, t] of [[own.y0, b.y1], [own.y1, b.y0], [own.y0, b.y0], [own.y1, b.y1]]) if (Math.abs(a - t) < best[1]) { best[1] = Math.abs(a - t); by = ny + t - a; }
+  }
+  return [Math.round(bx * 1000) / 1000, Math.round(by * 1000) / 1000];
+}
+const endDrag = e => { ptrs.delete(e.pointerId); if (drag && drag.room && drag.moved) save(); if (!ptrs.size) drag = null; else if (drag && drag.pinch) drag = null; };
+$("#view").addEventListener("pointerup", endDrag);
+$("#view").addEventListener("pointercancel", endDrag);
+$("#view").addEventListener("wheel", e => { if (viewMode !== "2d" || !$("#svg")) return; e.preventDefault(); const p = svgPt(e); zoomAt(e.deltaY > 0 ? 1.12 : 1/1.12, p.x, p.y); }, {passive: false});
+
+/* ================= 3D ================= */
+const T3 = {renderer: null, scene: null, camera: null, theta: 0.6, phi: 0.9, rad: 12, target: null, ok: true};
+function init3D(){
+  if (T3.renderer || !T3.ok) return;
+  try {
+    T3.renderer = new THREE.WebGLRenderer({antialias: true, preserveDrawingBuffer: true});
+  } catch(e) { T3.ok = false; return; }
+  T3.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  T3.renderer.setClearColor(0xf2f5fa);
+  T3.camera = new THREE.PerspectiveCamera(45, 1, 0.05, 500);
+  T3.target = new THREE.Vector3();
+  const c = T3.renderer.domElement, P3 = new Map(); let st = null;
+  c.addEventListener("contextmenu", e => e.preventDefault());
+  c.addEventListener("pointerdown", e => { c.setPointerCapture(e.pointerId); P3.set(e.pointerId, {x: e.clientX, y: e.clientY}); st = P3.size === 2 ? {pinch: dP()} : {pan: e.button === 2 || e.shiftKey}; });
+  const dP = () => { const a = [...P3.values()]; return Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) || 1; };
+  c.addEventListener("pointermove", e => {
+    const prev = P3.get(e.pointerId); if (!prev || !st) return;
+    const dx = e.clientX - prev.x, dy = e.clientY - prev.y; P3.set(e.pointerId, {x: e.clientX, y: e.clientY});
+    if (P3.size === 2) { const d = dP(); if (st.pinch) T3.rad = Math.min(150, Math.max(1.5, T3.rad * st.pinch / d)); st.pinch = d; pan3(dx/2, dy/2); }
+    else if (st.pan) pan3(dx, dy);
+    else { T3.theta -= dx * 0.008; T3.phi = Math.min(1.53, Math.max(0.05, T3.phi - dy * 0.008)); }
+    draw3();
+  });
+  const up = e => { P3.delete(e.pointerId); if (!P3.size) st = null; else st = {pan: false}; };
+  c.addEventListener("pointerup", up); c.addEventListener("pointercancel", up);
+  c.addEventListener("wheel", e => { e.preventDefault(); T3.rad = Math.min(150, Math.max(1.5, T3.rad * (e.deltaY > 0 ? 1.1 : 1/1.1))); draw3(); }, {passive: false});
+  new ResizeObserver(() => { if (viewMode === "3d") draw3(); }).observe($("#view"));
+}
+function pan3(dx, dy){
+  const k = T3.rad / 700, right = new THREE.Vector3(Math.cos(T3.theta), 0, -Math.sin(T3.theta)), fwd = new THREE.Vector3(-Math.sin(T3.theta), 0, -Math.cos(T3.theta));
+  T3.target.addScaledVector(right, -dx * k).addScaledVector(fwd, dy * k);
+}
+function draw3(){
+  if (!T3.renderer) return;
+  const el = $("#view"), w = el.clientWidth, h = el.clientHeight;
+  T3.renderer.setSize(w, h, false); T3.camera.aspect = w / h; T3.camera.updateProjectionMatrix();
+  const t = T3.target, r = T3.rad;
+  T3.camera.position.set(t.x + r*Math.sin(T3.phi)*Math.sin(T3.theta), t.y + r*Math.cos(T3.phi), t.z + r*Math.sin(T3.phi)*Math.cos(T3.theta));
+  T3.camera.lookAt(t);
+  T3.renderer.render(T3.scene, T3.camera);
+}
+function textSprite(txt, sub){
+  const cv = document.createElement("canvas"); cv.width = 512; cv.height = 160; const g = cv.getContext("2d");
+  g.fillStyle = "rgba(255,255,255,.85)"; g.beginPath(); g.roundRect ? g.roundRect(6, 6, 500, 148, 24) : g.rect(6, 6, 500, 148); g.fill();
+  g.fillStyle = "#1d2433"; g.textAlign = "center"; g.font = "600 54px Segoe UI, Arial"; g.fillText(txt.slice(0, 18), 256, 72);
+  g.font = "44px Segoe UI, Arial"; g.fillStyle = "#475069"; g.fillText(sub, 256, 130);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({map: new THREE.CanvasTexture(cv), depthTest: false}));
+  sp.scale.set(2.4, 0.75, 1); sp.renderOrder = 10; return sp;
+}
+function build3D(keepCam){
+  init3D();
+  const el = $("#view");
+  if (!T3.ok) { el.innerHTML = `<div class="empty">3D-вид недоступен в этом браузере (выключено ускорение графики). План сверху работает.</div>`; return; }
+  el.innerHTML = ""; el.appendChild(T3.renderer.domElement);
+  el.insertAdjacentHTML("beforeend", `<div class="zoombtns"><button data-z3="fit" title="Показать всё">⤢</button></div><div class="hint">Тяните — вращать · колесо/щипок — масштаб · правая кнопка или Shift — сдвиг</div>`);
+  const sc = T3.scene = new THREE.Scene();
+  sc.add(new THREE.HemisphereLight(0xffffff, 0xc8ced8, 2.4));
+  const dl = new THREE.DirectionalLight(0xffffff, 1.4); dl.position.set(6, 12, 8); sc.add(dl);
+  const rooms = shownRooms(), low = $("#lowWalls").checked;
+  const matWall = new THREE.MeshLambertMaterial({color: 0xf4f1ea}), matWallSel = new THREE.MeshLambertMaterial({color: 0xe6eefc});
+  const matFloor = new THREE.MeshLambertMaterial({color: 0xd9b98c, side: THREE.DoubleSide}), matGlass = new THREE.MeshLambertMaterial({color: 0x7fb4ef, transparent: true, opacity: 0.45});
+  const matDoor = new THREE.MeshLambertMaterial({color: 0x9a6a3c}), edgeMat = new THREE.LineBasicMaterial({color: 0x8a93a6});
+  const T = 0.1; let mn = new THREE.Vector3(Infinity, 0, Infinity), mx = new THREE.Vector3(-Infinity, 0, -Infinity);
+  const box = (len, hh, cx, cy, cz, ang, mat) => {
+    if (len <= 0.001 || hh <= 0.001) return;
+    const geo = new THREE.BoxGeometry(len, hh, T), m = new THREE.Mesh(geo, mat);
+    m.position.set(cx, cy, cz); m.rotation.y = -ang; sc.add(m);
+    const e = new THREE.LineSegments(new THREE.EdgesGeometry(geo), edgeMat); e.position.copy(m.position); e.rotation.copy(m.rotation); sc.add(e);
+  };
+  for (const r of rooms) {
+    const p = points(r), H = low ? Math.min(1.0, num(r.h)) : num(r.h), fullH = num(r.h), wm = r.id === sel && viewScope === "all" ? matWallSel : matWall;
+    const shape = new THREE.Shape(p.slice(0, -1).map(([x,y]) => new THREE.Vector2(x + r.x, y + r.y)));
+    const fl = new THREE.Mesh(new THREE.ShapeGeometry(shape), matFloor); fl.rotation.x = Math.PI/2; sc.add(fl);
+    for (const [x,y] of p) { mn.x = Math.min(mn.x, x + r.x); mn.z = Math.min(mn.z, y + r.y); mx.x = Math.max(mx.x, x + r.x); mx.z = Math.max(mx.z, y + r.y); }
+    mx.y = Math.max(mx.y, fullH);
+    segs(r).forEach((g, wi) => {
+      const ang = Math.atan2(g.uy, g.ux), at = (s, y, len, hh, mat) => box(len, hh, g.x0 + r.x + g.ux*(s + len/2), y + hh/2, g.y0 + r.y + g.uy*(s + len/2), ang, mat);
+      const ops = r.openings.filter(o => o.wall === wi).map(o => ({a: Math.max(0, num(o.pos)), b: Math.min(g.len, num(o.pos) + num(o.w)), s0: num(o.sill), s1: num(o.sill) + num(o.h), t: o.type})).filter(o => o.b > o.a).sort((a, b) => a.a - b.a);
+      let cur = 0;
+      for (const o of ops) {
+        if (o.a > cur) at(cur, 0, o.a - cur, H, wm);
+        const L = o.b - o.a;
+        if (o.s0 > 0) at(o.a, 0, L, Math.min(o.s0, H), wm);
+        if (H > o.s1) at(o.a, o.s1, L, H - o.s1, wm);
+        if (o.t === "window" && H > o.s0) { const gh = Math.min(o.s1, H) - o.s0; const m = new THREE.Mesh(new THREE.BoxGeometry(L, gh, 0.02), matGlass); m.position.set(g.x0 + r.x + g.ux*(o.a + L/2), o.s0 + gh/2, g.y0 + r.y + g.uy*(o.a + L/2)); m.rotation.y = -ang; sc.add(m); }
+        if (o.t === "door") { const [nx, ny] = inward(r, g), dh = Math.min(o.s1, H), d = new THREE.Mesh(new THREE.BoxGeometry(L, dh, 0.04), matDoor), hx = g.x0 + r.x + g.ux*o.a, hz = g.y0 + r.y + g.uy*o.a, a2 = ang + Math.atan2(ny*g.ux - nx*g.uy, nx*g.ux + ny*g.uy) * 0.6;
+          d.position.set(hx + Math.cos(a2)*L/2, dh/2, hz + Math.sin(a2)*L/2); d.rotation.y = -a2; sc.add(d); }
+        cur = Math.max(cur, o.b);
+      }
+      if (cur < g.len) at(cur, 0, g.len - cur, H, wm);
+    });
+    const c = labelPoint(r), sp = textSprite(r.name || "", fmt(metrics(r).floor) + " м²"); sp.position.set(c[0], H + 0.5, c[1]); sc.add(sp);
+  }
+  if (!rooms.length) { mn.set(-3, 0, -3); mx.set(3, 2.7, 3); }
+  if (!keepCam) { T3.target.set((mn.x + mx.x)/2, 0.6, (mn.z + mx.z)/2); T3.rad = Math.max(4, Math.hypot(mx.x - mn.x, mx.z - mn.z) * 1.25 + 2); }
+  draw3();
+}
+$("#view").addEventListener("click", e => { if (e.target.closest("[data-z3]")) build3D(false); });
+$("#lowWalls").onchange = () => build3D(true);
+
+document.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => { viewMode = b.dataset.mode; document.querySelectorAll("[data-mode]").forEach(x => x.classList.toggle("on", x === b)); vb = null; renderView(); });
+document.querySelectorAll("[data-scope]").forEach(b => b.onclick = () => { viewScope = b.dataset.scope; document.querySelectorAll("[data-scope]").forEach(x => x.classList.toggle("on", x === b)); vb = null; renderView(); });
+let last3 = "";
+function renderView(){
+  $("#lowWallsWrap").style.display = viewMode === "3d" ? "" : "none";
+  if (viewMode === "2d") { render2D(); last3 = ""; }
+  else { const key = viewScope + (viewScope === "one" ? sel : ""); build3D(last3 === key); last3 = key; }
+  $("#viewHelp").textContent = viewMode === "2d" ? "Цифры у стен — длины в метрах. Синие кружки — номера стен выбранной комнаты (нужны для дверей и окон). Комнаты прилипают друг к другу при перетаскивании." : "";
+}
+window.addEventListener("resize", () => { if (viewMode === "2d" && $("#svg")) { vb = null; render2D(); } });
+
+/* ================= Смета ================= */
+let pickFor = null; // id комнаты или "common"
+function renderEstimate(){
+  const el = $("#estimate");
+  const blocks = P.rooms.map(r => ({key: r.id, title: r.name || "Без названия", m: metrics(r), items: r.items, sub: (() => { const m = metrics(r); return `пол ${fmt(m.floor)} м² · стены ${fmt(m.walls)} м² · периметр ${fmt(m.perim)} м`; })()}));
+  blocks.push({key: "common", title: "Общее на объект", m: totalMetrics(), items: P.common, sub: "основа — сумма по всем комнатам (или своё количество)"});
+  let grand = 0;
+  const html = blocks.map(b => {
+    let tot = 0;
+    const rows = b.items.map((it, i) => { const c = itemCalc(it, b.m); tot += c.sum;
+      return `<tr data-blk="${b.key}" data-i="${i}">
+        <td><div>${esc(it.name)}</div><div class="muted" style="font-size:12px">${esc(it.cat)}${it.code ? " · " + esc(it.code) : ""}</div></td>
+        <td><select data-k="base">${Object.entries(BASES).map(([k,[n,u]]) => `<option value="${k}" ${it.base===k?"selected":""}>${n}${u ? ", " + u : ""}</option>`).join("")}</select>
+            ${it.base === "custom" ? `<input class="num" data-k="custom" value="${esc(it.custom)}" inputmode="decimal" title="Своё количество">` : `<div class="muted" style="font-size:12px">= ${fmt(c.base)} ${BASES[it.base][1]}</div>`}</td>
+        <td class="r"><input class="num" data-k="rate" value="${esc(it.rate)}" inputmode="decimal"></td>
+        <td class="r"><input class="num" data-k="reserve" value="${esc(it.reserve)}" inputmode="decimal"></td>
+        <td class="r"><input class="num" data-k="pack" value="${esc(it.pack)}" inputmode="decimal" placeholder="—"></td>
+        <td class="r"><b>${fmt(c.qty)}</b> ${esc(it.unit)}${!num(it.pack) ? `<div><label class="muted" style="font-size:12px"><input type="checkbox" data-k="whole" ${it.whole ? "checked" : ""}> целыми</label></div>` : ""}</td>
+        <td class="r"><input class="num" data-k="price" value="${esc(it.price)}" inputmode="decimal"></td>
+        <td class="r"><b>${money(c.sum)}</b></td>
+        <td class="noprint"><button class="icon danger" data-del="1" title="Убрать">✕</button></td></tr>`; }).join("");
+    grand += tot;
+    return `<div class="estroom"><h3><span>${esc(b.title)} <span class="muted" style="font-weight:400">· ${b.sub}</span></span>
+      <span class="row noprint">${b.key !== "common" && P.rooms.length > 1 && b.items.length ? `<button class="small" data-copyto="${b.key}" title="Добавить эти же материалы во все остальные комнаты">Те же материалы во все комнаты</button>` : ""}<button class="small primary" data-pick="${b.key}">+ Материал</button></span></h3>
+      ${b.items.length ? `<div class="scrollx"><table class="est"><tr><th>Материал</th><th>Считать по</th><th class="r">Расход на 1 ед.</th><th class="r">Запас, %</th><th class="r">Фасовка</th><th class="r">Нужно</th><th class="r">Цена</th><th class="r">Сумма</th><th class="noprint"></th></tr>${rows}
+      <tr><td colspan="7" class="r">Итого:</td><td class="r"><b>${money(tot)}</b></td><td class="noprint"></td></tr></table></div>` : `<div class="muted">Материалов пока нет.</div>`}</div>`;
+  }).join("");
+  const sum = summary();
+  el.innerHTML = (P.rooms.length ? "" : `<div class="empty">Сначала добавьте комнаты на вкладке «План и замеры».</div>`) + html +
+    `<h3>Сводная по материалам (что закупить на весь объект)</h3>
+    ${sum.length ? `<div class="scrollx"><table><tr><th>Материал</th><th class="r">Количество</th><th>Ед.</th><th class="r">Цена</th><th class="r">Сумма</th></tr>
+    ${sum.map(s => `<tr><td>${esc(s.name)}</td><td class="r">${fmt(s.qty)}</td><td>${esc(s.unit)}</td><td class="r">${money(s.price)}</td><td class="r">${money(s.sum)}</td></tr>`).join("")}</table></div>` : `<div class="muted">Пусто.</div>`}
+    <div class="total">Всего по объекту: ${money(grand)}</div>`;
+}
+function summary(){
+  const map = new Map();
+  const add = (items, m) => items.forEach(it => { const c = itemCalc(it, m), k = norm(it.name) + "|" + norm(it.unit) + "|" + num(it.price);
+    const s = map.get(k) || {name: it.name, unit: it.unit, price: num(it.price), qty: 0, sum: 0}; s.qty = r2(s.qty + c.qty); s.sum = r2(s.sum + c.sum); map.set(k, s); });
+  P.rooms.forEach(r => add(r.items, metrics(r))); add(P.common, totalMetrics());
+  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, "ru"));
+}
+const blkItems = k => k === "common" ? P.common : room(k)?.items;
+$("#estimate").addEventListener("change", e => {
+  const t = e.target, tr = t.closest("tr[data-blk]"); if (!tr || !t.dataset.k) return;
+  const it = blkItems(tr.dataset.blk)[+tr.dataset.i];
+  it[t.dataset.k] = t.type === "checkbox" ? t.checked : (t.tagName === "SELECT" ? t.value : t.value.replace(",", "."));
+  if (t.dataset.k === "base" && t.value === "custom" && !num(it.custom)) it.custom = 1;
+  save(); renderEstimate();
+});
+$("#estimate").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.pick) openPicker(b.dataset.pick);
+  else if (b.dataset.del) { const tr = b.closest("tr[data-blk]"); blkItems(tr.dataset.blk).splice(+tr.dataset.i, 1); save(); renderEstimate(); }
+  else if (b.dataset.copyto) {
+    const src = room(b.dataset.copyto); let n = 0;
+    for (const r of P.rooms) if (r !== src) for (const it of src.items) if (!r.items.some(x => norm(x.name) === norm(it.name))) { r.items.push({...JSON.parse(JSON.stringify(it)), id: uid()}); n++; }
+    save(); renderEstimate(); toast(n ? `Добавлено позиций: ${n} (повторы пропущены)` : "Во всех комнатах эти материалы уже есть");
+  }
+});
+$("#btnPrint").onclick = () => window.print();
+$("#btnRefreshPrices").onclick = () => {
+  if (!DB.items.length) return toast("База материалов не загружена");
+  const idx = new Map(DB.items.map(m => [norm(m.name) + "|" + norm(m.unit), m])); let n = 0, miss = 0;
+  for (const it of [...P.rooms.flatMap(r => r.items), ...P.common]) { const m = idx.get(norm(it.name) + "|" + norm(it.unit)); if (m) { if (num(m.price) !== num(it.price)) { it.price = m.price; n++; } } else miss++; }
+  save(); renderEstimate(); toast(`Цены обновлены: ${n}` + (miss ? `; не найдено в базе: ${miss}` : ""));
+};
+$("#btnExport").onclick = () => {
+  const wb = XLSX.utils.book_new(), title = P.name || "Объект";
+  const s1 = [[title], [], ["Материал", "Количество", "Ед.", "Цена", "Сумма"]]; let g = 0;
+  for (const s of summary()) { s1.push([s.name, s.qty, s.unit, s.price, s.sum]); g += s.sum; }
+  s1.push([], ["Итого", "", "", "", r2(g)]);
+  const s2 = [["Комната", "Материал", "Считать по", "Основа", "Расход", "Запас %", "Фасовка", "Количество", "Ед.", "Цена", "Сумма"]];
+  const add = (nm, items, m) => items.forEach(it => { const c = itemCalc(it, m); s2.push([nm, it.name, BASES[it.base][0], r2(c.base), num(it.rate), num(it.reserve), num(it.pack) || "", c.qty, it.unit, num(it.price), c.sum]); });
+  P.rooms.forEach(r => add(r.name, r.items, metrics(r))); add("Общее на объект", P.common, totalMetrics());
+  const s3 = [["Комната", "Высота", "Пол, м²", "Потолок, м²", "Стены без вычета, м²", "Стены чистые, м²", "Периметр, м", "Плинтус, м", "Откосы окон, м", "Откосы дверей, м", "Окна", "Двери", "Объём, м³"]];
+  P.rooms.forEach(r => { const m = metrics(r); s3.push([r.name, num(r.h), r2(m.floor), r2(m.ceiling), r2(m.wallsGross), r2(m.walls), r2(m.perim), r2(m.plinth), r2(m.slopesWin), r2(m.slopesDoor), m.windows, m.doors, r2(m.volume)]); });
+  const ws1 = XLSX.utils.aoa_to_sheet(s1), ws2 = XLSX.utils.aoa_to_sheet(s2), ws3 = XLSX.utils.aoa_to_sheet(s3);
+  ws1["!cols"] = [{wch: 45}, {wch: 12}, {wch: 8}, {wch: 12}, {wch: 14}]; ws2["!cols"] = [{wch: 18}, {wch: 40}, {wch: 26}, ...Array(8).fill({wch: 11})]; ws3["!cols"] = [{wch: 20}, ...Array(12).fill({wch: 12})];
+  XLSX.utils.book_append_sheet(wb, ws1, "Сводная"); XLSX.utils.book_append_sheet(wb, ws2, "По комнатам"); XLSX.utils.book_append_sheet(wb, ws3, "Замеры");
+  XLSX.writeFile(wb, "Смета_" + title.replace(/[\\/:*?"<>|]+/g, "_").slice(0, 60) + ".xlsx");
+};
+
+/* ================= Выбор материала ================= */
+function openPicker(key){
+  if (!DB.items.length) { toast("Сначала загрузите базу материалов (вкладка 3)"); document.querySelector('[data-tab="DB"]').click(); return; }
+  pickFor = key; $("#pickTarget").textContent = "Добавить в: " + (key === "common" ? "Общее на объект" : room(key)?.name);
+  $("#picker").classList.add("on"); $("#pickSearch").value = ""; renderPick(); setTimeout(() => $("#pickSearch").focus(), 30);
+}
+function searchDB(q, limit){
+  const words = norm(q).split(" ").filter(Boolean); const out = [];
+  for (const m of DB.items) { const hay = m._s || (m._s = norm(m.name + " " + m.cat + " " + m.code)); if (words.every(w => hay.includes(w))) { out.push(m); if (out.length >= limit) break; } }
+  return out;
+}
+function renderPick(){
+  const list = searchDB($("#pickSearch").value, 200);
+  $("#pickList").innerHTML = list.length ? `<table>${list.map(m => `<tr class="matrow" data-mat="${DB.items.indexOf(m)}"><td>${esc(m.name)}<div class="muted" style="font-size:12px">${esc(m.cat)}${m.code ? " · " + esc(m.code) : ""}</div></td><td class="r" style="white-space:nowrap">${money(num(m.price))} / ${esc(m.unit || "ед.")}</td></tr>`).join("")}</table>` : `<div class="empty">Ничего не найдено</div>`;
+}
+$("#pickSearch").oninput = renderPick;
+$("#pickClose").onclick = () => $("#picker").classList.remove("on");
+$("#picker").onclick = e => { if (e.target.id === "picker") $("#picker").classList.remove("on"); };
+document.addEventListener("keydown", e => { if (e.key === "Escape") $("#picker").classList.remove("on"); });
+$("#pickList").onclick = e => {
+  const tr = e.target.closest("[data-mat]"); if (!tr) return;
+  const items = blkItems(pickFor); const m = DB.items[+tr.dataset.mat]; items.push(itemFromMat(m));
+  save(); renderEstimate(); toast("Добавлено: " + m.name);
+};
+
+/* ================= База материалов из Excel ================= */
+$("#btnLoadDB").onclick = () => $("#fileDB").click();
+$("#fileDB").onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+  try {
+    const wb = XLSX.read(await f.arrayBuffer(), {type: "array"});
+    const items = []; const skipped = [];
+    for (const sn of wb.SheetNames) { const r = parseSheet(wb.Sheets[sn], sn); if (r) items.push(...r); else skipped.push(sn); }
+    if (!items.length) { alert("Не нашёл в файле таблицу с колонками «Наименование» и «Цена». Скачайте образец на этой вкладке."); return; }
+    DB = {items, file: f.name, loaded: new Date().toLocaleString("ru-RU")}; saveDB(); renderDB();
+    toast(`Загружено позиций: ${items.length}` + (skipped.length ? ` (пропущены листы: ${skipped.join(", ")})` : ""));
+  } catch(err) { alert("Не удалось прочитать файл: " + err.message); }
+};
+function parseSheet(ws, sheetName){
+  const rows = XLSX.utils.sheet_to_json(ws, {header: 1, raw: true, defval: ""});
+  const find = (row, re) => row.findIndex(c => re.test(norm(c)));
+  for (let h = 0; h < Math.min(25, rows.length); h++) {
+    const row = rows[h], cName = find(row, /наимен|название|материал|товар|номенклат|позиция/), cPrice = find(row, /цена|стоим|руб/);
+    if (cName < 0 || cPrice < 0) continue;
+    const col = {name: cName, price: cPrice, unit: find(row, /^ед|ед\.|единиц|изм/), cat: find(row, /катег|раздел|групп|вид/), code: find(row, /артик|код/),
+                 rate: find(row, /расход|норма/), pack: find(row, /фасов|упаков|в уп|объем уп|вес уп/), base: find(row, /считать|на что|основ|примен/)};
+    const out = []; let cat = "";
+    for (const r of rows.slice(h + 1)) {
+      const name = String(r[col.name] ?? "").trim(), price = num(r[col.price]);
+      const filled = r.map(c => String(c).trim()).filter(Boolean);
+      if (!name) { if (filled.length === 1 && !num(filled[0])) cat = filled[0]; continue; } // строка-заголовок раздела
+      if (!price && r.filter(c => String(c).trim()).length === 1) { cat = name; continue; } // строка-заголовок раздела
+      out.push({name, price, unit: col.unit >= 0 ? String(r[col.unit]).trim() : "", cat: col.cat >= 0 && String(r[col.cat]).trim() ? String(r[col.cat]).trim() : (cat || (sheetName && !/^лист|sheet/i.test(sheetName) ? sheetName : "")),
+                code: col.code >= 0 ? String(r[col.code]).trim() : "", rate: col.rate >= 0 ? num(r[col.rate]) || "" : "", pack: col.pack >= 0 ? num(r[col.pack]) || "" : "", base: col.base >= 0 ? parseBaseWord(r[col.base]) : ""});
+    }
+    return out.length ? out : null;
+  }
+  return null;
+}
+function renderDB(){
+  $("#dbInfo").innerHTML = DB.items.length ? `Загружено <b>${DB.items.length}</b> позиций из файла «${esc(DB.file)}» (${esc(DB.loaded)}). База хранится в этом браузере на этом компьютере; чтобы обновить цены — загрузите файл заново.` : `База пуста. Загрузите свой Excel с материалами и ценами.`;
+  const list = searchDB($("#dbSearch").value, 300);
+  $("#dbTable").innerHTML = DB.items.length ? `<table><tr><th>Категория</th><th>Наименование</th><th>Ед.</th><th class="r">Цена</th><th class="r">Расход</th><th class="r">Фасовка</th><th>Считать по</th></tr>
+    ${list.map(m => `<tr><td class="muted">${esc(m.cat)}</td><td>${esc(m.name)}${m.code ? ` <span class="pill">${esc(m.code)}</span>` : ""}</td><td>${esc(m.unit)}</td><td class="r">${money(num(m.price))}</td><td class="r">${m.rate || ""}</td><td class="r">${m.pack || ""}</td><td class="muted">${m.base ? BASES[m.base][0] : ""}</td></tr>`).join("")}</table>
+    ${list.length >= 300 ? `<div class="muted">Показаны первые 300 — уточните поиск.</div>` : ""}` : "";
+}
+$("#dbSearch").oninput = renderDB;
+$("#btnClearDB").onclick = () => { if (DB.items.length && confirm("Очистить загруженную базу? Сметы объектов не пострадают.")) { DB = {items: [], file: "", loaded: ""}; saveDB(); renderDB(); } };
+const TEMPLATE = [
+  ["Категория", "Наименование", "Ед. изм.", "Цена", "Расход", "Фасовка", "Считать по", "Артикул"],
+  ["Полы", "Ламинат 33 класс, дуб светлый (упак. 2,4 м²)", "уп", 2150, 1, 2.4, "пол", "ПР-001"],
+  ["Полы", "Подложка под ламинат 3 мм", "м²", 85, 1, "", "пол", "ПР-002"],
+  ["Полы", "Плинтус напольный ПВХ 2,5 м", "шт", 210, 1, 2.5, "плинтус", "ПР-003"],
+  ["Стены", "Шпаклёвка финишная, мешок 25 кг", "мешок", 640, 1.2, 25, "стены", "ПР-010"],
+  ["Стены", "Грунтовка глубокого проникновения 10 л", "канистра", 780, 0.15, 10, "стены", "ПР-011"],
+  ["Стены", "Обои флизелиновые 1,06×10 м", "рулон", 1890, 1, 10.6, "стены", "ПР-012"],
+  ["Стены", "Плитка настенная 30×60", "м²", 1250, 1, "", "стены", "ПР-013"],
+  ["Стены", "Клей плиточный, мешок 25 кг", "мешок", 520, 5, 25, "стены", "ПР-014"],
+  ["Потолок", "Краска для потолков белая 9 л", "ведро", 2400, 0.25, 9, "потолок", "ПР-020"],
+  ["Двери", "Дверь межкомнатная в сборе", "шт", 8900, 1, "", "двери", "ПР-030"],
+  ["Работы", "Укладка ламината", "м²", 450, 1, "", "пол", "Р-001"],
+];
+$("#btnTemplate").onclick = () => {
+  const wb = XLSX.utils.book_new(), ws = XLSX.utils.aoa_to_sheet(TEMPLATE);
+  ws["!cols"] = [{wch: 12}, {wch: 48}, {wch: 10}, {wch: 10}, {wch: 9}, {wch: 9}, {wch: 12}, {wch: 10}];
+  XLSX.utils.book_append_sheet(wb, ws, "Материалы"); XLSX.writeFile(wb, "Образец_базы_материалов.xlsx");
+};
+
+/* ================= Пример (выдуманные данные) ================= */
+function loadDemo(){
+  P = newProject(); P.name = "Пример: двухкомнатная квартира";
+  const a = newRoom("Гостиная", 5.2, 4.1); a.openings = [{id: uid(), type: "window", wall: 0, pos: 1.6, w: 1.8, h: 1.5, sill: 0.8}, {id: uid(), type: "door", wall: 2, pos: 0.4, w: 0.9, h: 2.0, sill: 0}];
+  const b = newRoom("Спальня", 3.6, 4.1); b.x = 5.2; b.openings = [{id: uid(), type: "window", wall: 0, pos: 1.0, w: 1.4, h: 1.5, sill: 0.8}, {id: uid(), type: "door", wall: 2, pos: 2.3, w: 0.8, h: 2.0, sill: 0}];
+  const c = newRoom("Коридор", 0, 0); c.shape = "poly"; c.walls = [{dir:"R",len:6.2},{dir:"D",len:1.4},{dir:"L",len:3.6},{dir:"D",len:1.6},{dir:"L",len:2.6},{dir:"U",len:3.0}]; c.y = 4.1; c.x = 0.6;
+  c.openings = [{id: uid(), type: "door", wall: 5, pos: 1.9, w: 0.9, h: 2.05, sill: 0}];
+  const d = newRoom("Санузел", 2.0, 1.6); d.x = 3.2; d.y = 5.5; d.h = 2.6; d.openings = [{id: uid(), type: "door", wall: 0, pos: 0.6, w: 0.7, h: 2.0, sill: 0}];
+  P.rooms = [a, b, c, d]; sel = a.id;
+  if (!DB.items.length) { DB = {items: TEMPLATE.slice(1).map(r => ({cat: r[0], name: r[1], unit: r[2], price: r[3], rate: r[4], pack: r[5], base: parseBaseWord(r[6]), code: r[7]})), file: "образец (выдуманные цены)", loaded: new Date().toLocaleString("ru-RU")}; saveDB(); }
+  const byName = s => DB.items.find(m => norm(m.name).includes(norm(s)));
+  for (const r of [a, b]) for (const s of ["Ламинат", "Подложка", "Плинтус напольный", "Шпаклёвка", "Грунтовка", "Обои", "Краска для потолков"]) { const m = byName(s); if (m) r.items.push(itemFromMat(m)); }
+  for (const s of ["Плитка настенная", "Клей плиточный"]) { const m = byName(s); if (m) d.items.push(itemFromMat(m)); }
+  const door = byName("Дверь межкомнатная"); if (door) { const it = itemFromMat(door); it.base = "doors"; it.reserve = 0; P.common.push(it); }
+  save();
+}
+
+/* ================= Старт ================= */
+function renderAll(){ $("#pname").value = P.name || ""; renderRoomList(); renderEditor(); vb = null; renderView(); if ($("#pageEst").classList.contains("on")) renderEstimate(); if ($("#pageDB").classList.contains("on")) renderDB(); }
+renderAll();
+</script>
+</body>
+</html>
