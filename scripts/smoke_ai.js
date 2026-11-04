@@ -11,7 +11,7 @@ const path = require('path'), fs = require('fs');
     <svg width="600" height="400"><rect x="20" y="20" width="340" height="260" fill="none" stroke="#000" stroke-width="6"/><rect x="360" y="20" width="220" height="260" fill="none" stroke="#000" stroke-width="6"/>
     <text x="150" y="150">Кухня 12,0</text><text x="420" y="150">Санузел</text><text x="150" y="15">4000</text><text x="440" y="15">2500</text><text x="0" y="160">3000</text></svg></div>`);
   const pdfPath = path.join(shots, 'plan_test.pdf'); await pg0.pdf({path: pdfPath, format: 'A4'}); await pg0.close();
-  const ctx = await browser.newContext({viewport: {width: 1300, height: 900}});
+  const ctx = await browser.newContext({viewport: {width: 1300, height: 900}, acceptDownloads: true});
   const page = await ctx.newPage(); const errors = [], net = [], aiCalls = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
@@ -33,7 +33,7 @@ const path = require('path'), fs = require('fs');
     aiCalls.push({model: body.model, hasImage: all.includes('image_url'), len: all.length});
     let text = 'работает';
     if (all.includes('Восстанови помещения')) text = '```json\n' + JSON.stringify(PLAN) + '\n```';
-    else if (all.includes('Перепиши ВСЕ строки сметы')) text = JSON.stringify(CLIENT);
+    else if (all.includes('Перепиши ВСЕ строки')) text = JSON.stringify(CLIENT);
     else if (all.includes('Подбери материалы')) text = JSON.stringify({suggestions: [
       {room: 2, i: 0, base: 'floor', rate: 1, pack: 2.4, reserve: 10, why: 'ламинат как в комнатах'},
       {room: 2, i: 5, base: 'walls', rate: 1, pack: 10.6, reserve: 10, why: 'обои'},
@@ -71,13 +71,25 @@ const path = require('path'), fs = require('fs');
   await page.screenshot({path: `${shots}/rec_result.png`});
   // отмена и повтор
   await page.click('#recUndo'); console.log('after undo rooms:', await page.evaluate(() => P.rooms.map(r => r.name).join(',')));
-  // смета заказчика (на примере)
-  await page.click('[data-tab="Client"]');
-  await page.setInputFiles('#fileClient', pdfPath);
-  await page.waitForSelector('#client table', {timeout: 20000});
-  console.log('client:', (await page.textContent('#client .metrics')).replace(/\s+/g, ' '));
-  await page.click('#btnAIMatch'); await page.waitForTimeout(1200);
-  await page.screenshot({path: `${shots}/client.png`, fullPage: true});
+  // смета работ из Excel (без ИИ) и акт
+  await page.click('[data-tab="Est"]');
+  await page.setInputFiles('#fileWorks', path.join(path.dirname(process.argv[3] || '/tmp/prices.xlsx'), 'works.xlsx'));
+  await page.waitForTimeout(500);
+  console.log('works from excel:', await page.evaluate(() => docOf('works').lines.map(l => `${l.section}|${l.name}|${l.qty}|${l.price}|${lineSum(l)}`).join('; ') + ' total=' + docOf('works').total));
+  // смета работ через ИИ (PDF)
+  await page.setInputFiles('#fileWorks', pdfPath);
+  await page.waitForFunction(() => docOf('works').lines.length === 4, null, {timeout: 20000});
+  console.log('works by AI:', await page.evaluate(() => docSum(docOf('works'))));
+  await page.click('[data-tab="Act"]'); await page.click('#btnActFill');
+  // факт: ламината уложили 10 уп вместо 9, вывоз мусора 2 рейса, доп. работа
+  await page.locator('#act tr[data-li="0"] input[data-k=qty]').fill('10'); await page.locator('#act tr[data-li="0"] input[data-k=qty]').dispatchEvent('change');
+  await page.click('#btnActAdd');
+  await page.locator('#act tr[data-li="4"] input[data-k=name]').fill('Выравнивание стены'); await page.locator('#act tr[data-li="4"] input[data-k=name]').dispatchEvent('change');
+  await page.locator('#act tr[data-li="4"] input[data-k=qty]').fill('3'); await page.locator('#act tr[data-li="4"] input[data-k=qty]').dispatchEvent('change');
+  await page.locator('#act tr[data-li="4"] input[data-k=price]').fill('700'); await page.locator('#act tr[data-li="4"] input[data-k=price]').dispatchEvent('change');
+  console.log('act:', (await page.textContent('#act .metrics')).replace(/\s+/g, ' '));
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#btnActExport')]); console.log('act export:', dl.suggestedFilename());
+  await page.screenshot({path: `${shots}/act.png`, fullPage: true});
   // подбор материалов
   await page.click('[data-tab="Est"]'); await page.click('#btnSuggest');
   await page.fill('#sugWish', 'в коридоре ламинат и обои'); await page.click('#sugGo');

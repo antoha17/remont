@@ -262,113 +262,190 @@ $("#recReport").addEventListener("click", e => {
   if (e.target.id === "recUndo" && recLast) { P = JSON.parse(recLast.backup); sel = P.rooms[0]?.id || null; recLast = null; save(); renderAll(); toast("Распознавание отменено"); }
 });
 
-/* ---------- Смета заказчика ---------- */
-const clientOf = () => (P.client = P.client || {lines: [], total: null, match: {}, files: ""});
-const CLIENT_PROMPT = `На изображениях — смета (или её часть) на ремонтные работы и/или материалы. Перепиши ВСЕ строки сметы в таблицу.
+/* ---------- Смета работ (согласованная с заказчиком) и акт выполненных работ ---------- */
+// P.works — смета работ, P.act — акт: {lines:[{id, ref, section, name, unit, qty, price, sum, kind}], total, notes, files}
+function docOf(k){
+  if (k === "works" && !P.works && P.client && (P.client.lines || []).length) // старый раздел «Смета заказчика» → смета работ
+    P.works = {lines: P.client.lines, total: P.client.total ?? null, notes: P.client.notes || "", files: P.client.files || ""};
+  if (P.client) delete P.client;
+  return (P[k] = P[k] || {lines: [], total: null, notes: "", files: ""});
+}
+const DOC_NAME = {works: "смета работ", act: "акт выполненных работ"};
+const lineSum = l => (l.sum !== "" && l.sum != null) ? num(l.sum) : r2(num(l.qty) * num(l.price));
+const docSum = d => r2(d.lines.reduce((a, l) => a + lineSum(l), 0));
+const KIND = {work: "работа", material: "материал", other: "прочее"};
+function words(s){ return norm(s).replace(/[^a-zа-я0-9 ]/g, " ").split(" ").filter(w => w.length > 2 && !/^(для|под|без|мм|шт)$/.test(w)).map(w => w.slice(0, 5)); }
+const DOC_PROMPT = what => `На изображениях — ${what} (или его часть) по ремонту квартиры: работы и, возможно, материалы. Перепиши ВСЕ строки в таблицу.
 Верни ТОЛЬКО JSON без пояснений:
-{"lines":[{"section":"раздел или пусто","name":"наименование","unit":"ед. изм.","qty":число|null,"price":число|null,"sum":число|null,"kind":"material"|"work"|"other"}],
+{"lines":[{"section":"раздел или пусто","name":"наименование","unit":"ед. изм.","qty":число|null,"price":число|null,"sum":число|null,"kind":"work"|"material"|"other"}],
  "total":число|null, "notes":"строка"}
 Правила:
 - Переписывай как есть, ничего не выдумывай и не пересчитывай. Числа — с точкой как разделителем дробной части, без пробелов и валюты.
-- Строки «Итого» по разделам в lines не включай; общий итог сметы — в total.
-- kind: material — материалы, work — работы, other — прочее (доставка, вывоз мусора и т. п.).
-- Если смета на нескольких фото — объедини, повторяющиеся строки не дублируй.
+- Строки «Итого» по разделам в lines не включай; общий итог документа — в total.
+- kind: work — работы, material — материалы, other — прочее (доставка, вывоз мусора и т. п.).
+- Если документ на нескольких фото — объедини, повторяющиеся строки не дублируй.
 - notes — кратко по-русски: что не удалось прочитать или прочитано неуверенно.`;
-$("#btnClientLoad").onclick = () => { if (!aiReady()) { toast("Сначала подключите ИИ"); openAI(); return; } $("#fileClient").click(); };
-$("#fileClient").onchange = async e => {
-  const files = [...e.target.files]; e.target.value = ""; if (!files.length) return;
-  const C = clientOf();
-  if (C.lines.length && !confirm("Заменить уже загруженную смету заказчика?")) return;
-  const res = await withBusy($("#clientMsg"), "ИИ читает смету (обычно 20–120 секунд)", async signal => {
-    const pages = await filesToImages(files);
-    return parseAIJSON(await callAI({signal, maxTokens: 16000, system: "Ты — внимательный сметчик. Отвечаешь только JSON.",
-      messages: [{role: "user", parts: [...pages.map(p => ({image: p.url})), {text: CLIENT_PROMPT}]}]}));
-  });
-  if (!res) return;
-  C.lines = (res.lines || []).filter(l => l && l.name).map(l => ({id: uid(), section: String(l.section || ""), name: String(l.name), unit: String(l.unit || ""),
-    qty: l.qty == null ? "" : num(l.qty), price: l.price == null ? "" : num(l.price), sum: l.sum == null ? "" : num(l.sum), kind: ["material", "work", "other"].includes(l.kind) ? l.kind : "other"}));
-  C.total = res.total == null ? null : num(res.total); C.notes = String(res.notes || ""); C.files = files.map(f => f.name).join(", "); C.match = {};
-  save(); renderClient(); toast(`Строк в смете: ${C.lines.length}`);
-};
-$("#btnClientAdd").onclick = () => { clientOf().lines.push({id: uid(), section: "", name: "", unit: "", qty: "", price: "", sum: "", kind: "material"}); save(); renderClient(); };
-$("#btnClientClear").onclick = () => { if (confirm("Очистить смету заказчика?")) { P.client = null; save(); renderClient(); } };
-const lineSum = l => num(l.sum) || r2(num(l.qty) * num(l.price));
-const KIND = {material: "материал", work: "работа", other: "прочее"};
-function words(s){ return norm(s).replace(/[^a-zа-я0-9 ]/g, " ").split(" ").filter(w => w.length > 2 && !/^(для|под|без|мм|шт)$/.test(w)).map(w => w.slice(0, 5)); }
-function autoMatch(ours, lines, C){
-  const used = new Set(Object.values(C.match));
-  for (const o of ours) {
-    if (C.match[o.key] !== undefined) continue;
-    const wo = new Set(words(o.name)); let best = null, bs = 0;
-    for (const l of lines) { if (used.has(l.id) || l.kind === "work") continue; const wl = words(l.name); const common = wl.filter(w => wo.has(w)).length; const s = common / Math.max(2, Math.min(wo.size, wl.length)); if (s > bs) { bs = s; best = l; } }
-    if (best && bs >= 0.5) { C.match[o.key] = best.id; used.add(best.id); }
-  }
+function normLine(l){
+  return {id: uid(), ref: l.ref || null, section: String(l.section || ""), name: String(l.name || ""), unit: String(l.unit || ""),
+    qty: l.qty == null || l.qty === "" ? "" : num(l.qty), price: l.price == null || l.price === "" ? "" : num(l.price), sum: l.sum == null || l.sum === "" ? "" : num(l.sum),
+    kind: KIND[l.kind] ? l.kind : "work"};
 }
-function renderClient(){
-  const el = $("#client"); if (!el) return;
-  const C = clientOf(), ours = summary().map(s => ({...s, key: norm(s.name) + "|" + norm(s.unit)}));
-  if (!C.lines.length) { el.innerHTML = `<div class="empty">Смета заказчика не загружена.</div>`; return; }
-  autoMatch(ours, C.lines, C);
-  const sumAll = C.lines.reduce((a, l) => a + lineSum(l), 0), sumMat = C.lines.filter(l => l.kind === "material").reduce((a, l) => a + lineSum(l), 0);
-  const ourTotal = ours.reduce((a, s) => a + s.sum, 0), byId = new Map(C.lines.map(l => [l.id, l]));
-  const matched = new Set(Object.values(C.match));
-  const cmpRows = ours.map(o => { const l = byId.get(C.match[o.key]); const ls = l ? lineSum(l) : 0, diff = l ? r2(ls - o.sum) : null;
-    return `<tr class="${diff == null ? "" : diff < 0 ? "over" : "under"}"><td>${esc(o.name)}</td><td class="r">${fmt(o.qty)} ${esc(o.unit)}</td><td class="r">${money(o.sum)}</td>
-      <td><select data-match="${esc(o.key)}" style="max-width:260px"><option value="">— нет в смете заказчика —</option>${C.lines.map(x => `<option value="${x.id}" ${x.id === C.match[o.key] ? "selected" : ""}>${esc(x.name.slice(0, 70))}</option>`).join("")}</select></td>
-      <td class="r">${l ? fmt(num(l.qty)) + " " + esc(l.unit) : ""}</td><td class="r">${l ? money(ls) : ""}</td>
-      <td class="r"><b>${diff == null ? "" : (diff >= 0 ? "+" : "") + money(diff)}</b></td></tr>`; }).join("");
-  const extra = C.lines.filter(l => !matched.has(l.id) && l.kind === "material");
-  const diffTot = r2(sumMat - ourTotal);
-  el.innerHTML = `
-    ${C.notes ? `<div class="box" style="background:#fffaf0">${esc(C.notes)}</div>` : ""}
-    <div class="box"><div class="metrics" style="max-width:520px">
-      <span>Итого по смете заказчика (все строки)</span><b>${money(sumAll)}</b>
-      ${C.total != null ? `<span>Итог, написанный в смете</span><b class="${Math.abs(C.total - sumAll) > 1 ? "warn" : ""}">${money(C.total)}</b>` : ""}
-      <span>Из них материалы</span><b>${money(sumMat)}</b>
-      <span>Ваш расчёт материалов</span><b>${money(ourTotal)}</b>
-      <span>${diffTot >= 0 ? "Запас по материалам" : "Не хватает по материалам"}</span><b style="color:${diffTot >= 0 ? "var(--ok)" : "var(--bad)"}">${money(Math.abs(diffTot))}</b>
-    </div>${C.total != null && Math.abs(C.total - sumAll) > 1 ? `<div class="warn" style="font-size:12px;margin-top:4px">Сумма строк не совпадает с итогом в смете — возможно, какая-то строка прочитана неверно или не попала.</div>` : ""}</div>
-    <h3>Сравнение по материалам</h3>
-    <div class="muted" style="font-size:12px;margin-bottom:4px">Красным — ваш расчёт дороже, чем заложено в смете заказчика (не влезает). Зелёным — влезает. Пары подобраны по названию автоматически — поправьте, если нужно.</div>
-    <div class="row" style="margin-bottom:6px"><button class="small" id="btnAIMatch">Подобрать пары с помощью ИИ</button><span id="matchMsg"></span></div>
-    ${ours.length ? `<div class="scrollx"><table><tr><th>Ваш материал</th><th class="r">Ваше кол-во</th><th class="r">Ваша сумма</th><th>Строка сметы заказчика</th><th class="r">Кол-во по смете</th><th class="r">Сумма по смете</th><th class="r">Разница</th></tr>${cmpRows}</table></div>` : `<div class="muted">В вашем расчёте (вкладка 2) пока нет материалов.</div>`}
-    ${extra.length ? `<h3>Материалы из сметы заказчика, которых нет в вашем расчёте</h3><ul>${extra.map(l => `<li>${esc(l.name)} — ${fmt(num(l.qty))} ${esc(l.unit)}, ${money(lineSum(l))}</li>`).join("")}</ul>` : ""}
-    <h3>Строки сметы заказчика ${C.files ? `<span class="muted" style="font-weight:400">· ${esc(C.files)}</span>` : ""}</h3>
-    <div class="scrollx"><table class="est"><tr><th>Раздел</th><th>Наименование</th><th>Тип</th><th>Ед.</th><th class="r">Кол-во</th><th class="r">Цена</th><th class="r">Сумма</th><th></th></tr>
-    ${C.lines.map((l, i) => `<tr data-cl="${i}">
+/* Excel-смета разбирается без ИИ: ищем строку заголовков по смыслу */
+function linesFromSheet(ws){
+  const rows = XLSX.utils.sheet_to_json(ws, {header: 1, raw: true, defval: ""}), find = (row, re, not) => row.findIndex((c, i) => re.test(norm(c)) && !(not || []).includes(i));
+  for (let h = 0; h < Math.min(30, rows.length); h++) {
+    const row = rows[h], cName = find(row, /наимен|название|вид работ|работ[аы]|позиция/);
+    if (cName < 0) continue;
+    const cPrice = find(row, /цена|расценк|стоимость ед|за ед/), cSum = find(row, /сумм|стоимост|всего|итого/, [cPrice]), cQty = find(row, /кол|объем|объём|кол-во/);
+    if (cQty < 0 && cSum < 0) continue;
+    const cUnit = find(row, /^ед|ед\.|единиц|изм/), out = []; let section = "", total = null;
+    for (const r of rows.slice(h + 1)) {
+      const filled = r.map(c => String(c).trim()).filter(Boolean), name = String(r[cName] ?? "").trim();
+      if (!filled.length) continue;
+      if (/^(итого|всего)/i.test(name) || (!name && /^(итого|всего)/i.test(filled[0]))) { const v = num(r[cSum]); if (/^всего|итого по смете|итого:?$/i.test(name || filled[0]) && v) total = v; continue; }
+      if (filled.length === 1 || (name && cQty >= 0 && cSum >= 0 && !num(r[cQty]) && !num(r[cSum]) && !num(r[cPrice]))) { section = filled.find(x => !/^\d+([.,]\d+)?$/.test(x)) || section; continue; }
+      if (!name) continue;
+      out.push(normLine({section, name, unit: cUnit >= 0 ? r[cUnit] : "", qty: cQty >= 0 ? r[cQty] : "", price: cPrice >= 0 ? r[cPrice] : "", sum: cSum >= 0 ? r[cSum] : "",
+        kind: /материал/i.test(section) ? "material" : "work"}));
+    }
+    if (out.length) return {lines: out, total};
+  }
+  return null;
+}
+async function loadDoc(k, files){
+  const D = docOf(k), msg = $(k === "works" ? "#worksMsg" : "#actMsg");
+  if (D.lines.length && !confirm(`Заменить уже загруженную ${k === "works" ? "смету работ" : "таблицу акта"}?`)) return;
+  const xl = files.filter(f => /\.(xlsx|xlsm|xls|csv)$/i.test(f.name)), other = files.filter(f => !xl.includes(f));
+  let res = null;
+  if (xl.length && !other.length) {
+    const lines = []; let total = null;
+    for (const f of xl) { const wb = XLSX.read(await f.arrayBuffer(), {type: "array"}); for (const sn of wb.SheetNames) { const r = linesFromSheet(wb.Sheets[sn]); if (r) { lines.push(...r.lines); total = r.total ?? total; } } }
+    if (!lines.length) { msg.innerHTML = `<div class="errbox">Не нашёл в Excel таблицу с колонками «Наименование» и «Количество»/«Сумма».</div>`; return; }
+    res = {lines, total, notes: ""};
+  } else {
+    if (!aiReady()) { toast("Для PDF и фото нужен ИИ — подключите его"); openAI(); return; }
+    res = await withBusy(msg, `ИИ читает ${DOC_NAME[k]} (обычно 20–120 секунд)`, async signal => {
+      const pages = await filesToImages(other);
+      return parseAIJSON(await callAI({signal, maxTokens: 16000, system: "Ты — внимательный сметчик. Отвечаешь только JSON.",
+        messages: [{role: "user", parts: [...pages.map(p => ({image: p.url})), {text: DOC_PROMPT(k === "works" ? "смета" : "акт выполненных работ")}]}]}));
+    });
+    if (!res) return;
+    res.lines = (res.lines || []).filter(l => l && l.name).map(normLine);
+  }
+  D.lines = res.lines; D.total = res.total == null ? null : num(res.total); D.notes = String(res.notes || ""); D.files = files.map(f => f.name).join(", ");
+  if (k === "act") autoRef();
+  save(); k === "works" ? renderWorks() : renderAct(); toast(`Строк: ${D.lines.length}`);
+}
+function linesTable(k, D, cols){
+  return `<div class="scrollx"><table class="est"><tr><th>Раздел</th><th>Наименование</th><th>Тип</th><th>Ед.</th><th class="r">Кол-во</th><th class="r">Цена</th><th class="r">Сумма</th>${cols ? cols.head : ""}<th></th></tr>
+    ${D.lines.map((l, i) => `<tr data-doc="${k}" data-li="${i}">
       <td><input data-k="section" value="${esc(l.section)}" style="width:110px"></td>
-      <td><input data-k="name" value="${esc(l.name)}" style="width:280px"></td>
-      <td><select data-k="kind">${Object.entries(KIND).map(([k, v]) => `<option value="${k}" ${l.kind === k ? "selected" : ""}>${v}</option>`).join("")}</select></td>
-      <td><input data-k="unit" value="${esc(l.unit)}" style="width:60px"></td>
+      <td><input data-k="name" value="${esc(l.name)}" style="width:260px"></td>
+      <td><select data-k="kind">${Object.entries(KIND).map(([kk, v]) => `<option value="${kk}" ${l.kind === kk ? "selected" : ""}>${v}</option>`).join("")}</select></td>
+      <td><input data-k="unit" value="${esc(l.unit)}" style="width:56px"></td>
       <td class="r"><input class="num" data-k="qty" value="${esc(l.qty)}" inputmode="decimal"></td>
       <td class="r"><input class="num" data-k="price" value="${esc(l.price)}" inputmode="decimal"></td>
-      <td class="r"><input class="num" style="width:100px" data-k="sum" value="${esc(l.sum)}" inputmode="decimal"></td>
-      <td><button class="icon danger" data-cdel="${i}">✕</button></td></tr>`).join("")}</table></div>`;
+      <td class="r"><b>${money(lineSum(l))}</b></td>${cols ? cols.row(l) : ""}
+      <td class="noprint"><button class="icon danger" data-ldel="1">✕</button></td></tr>`).join("")}</table></div>`;
 }
-$("#client").addEventListener("change", e => {
-  const t = e.target, C = clientOf();
-  if (t.dataset.match !== undefined) { if (t.value) { for (const k in C.match) if (C.match[k] === t.value) delete C.match[k]; C.match[t.dataset.match] = t.value; } else C.match[t.dataset.match] = null; save(); renderClient(); return; }
-  const tr = t.closest("tr[data-cl]"); if (!tr || !t.dataset.k) return;
-  const l = C.lines[+tr.dataset.cl]; l[t.dataset.k] = ["qty", "price", "sum"].includes(t.dataset.k) ? t.value.replace(",", ".") : t.value;
-  save(); renderClient();
-});
-$("#client").addEventListener("click", async e => {
-  const C = clientOf();
-  if (e.target.dataset.cdel !== undefined) { C.lines.splice(+e.target.dataset.cdel, 1); save(); renderClient(); }
-  if (e.target.id === "btnAIMatch") {
-    if (!aiReady()) { toast("Сначала подключите ИИ"); openAI(); return; }
-    const ours = summary().map(s => ({key: norm(s.name) + "|" + norm(s.unit), name: s.name, unit: s.unit}));
-    const res = await withBusy($("#matchMsg"), "ИИ сопоставляет", async signal => parseAIJSON(await callAI({signal, system: "Ты — сметчик. Отвечаешь только JSON.",
-      messages: [{role: "user", parts: [{text: `Сопоставь материалы из моего расчёта со строками сметы заказчика (одно и то же по смыслу, даже если названия разные).
-Мой расчёт: ${JSON.stringify(ours.map((o, i) => ({i, name: o.name, unit: o.unit})))}
-Смета заказчика: ${JSON.stringify(C.lines.map((l, j) => ({j, name: l.name, unit: l.unit, kind: l.kind})))}
-Верни ТОЛЬКО JSON: {"pairs":[{"i":номер из моего расчёта,"j":номер строки заказчика}]}. Каждую строку заказчика используй не больше одного раза. Если пары нет — не включай.`}]}]})));
-    if (!res) return;
-    C.match = {}; for (const p of res.pairs || []) { const o = ours[p.i], l = C.lines[p.j]; if (o && l) C.match[o.key] = l.id; }
-    for (const o of ours) if (C.match[o.key] === undefined) C.match[o.key] = null;
-    save(); renderClient(); toast("Пары подобраны — проверьте");
+function docHeader(D){
+  const s = docSum(D);
+  return `${D.notes ? `<div class="box" style="background:#fffaf0">${esc(D.notes)}</div>` : ""}
+    ${D.total != null && Math.abs(D.total - s) > 1 ? `<div class="warn" style="margin:6px 0">Сумма строк (${money(s)}) не совпадает с итогом в документе (${money(D.total)}) — возможно, какая-то строка прочитана неверно или не попала.</div>` : ""}`;
+}
+// таблицы редактируются одинаково в обоих разделах
+for (const sel of ["#works", "#act"]) {
+  $(sel).addEventListener("change", e => {
+    const t = e.target, tr = t.closest("tr[data-doc]"); if (!tr || !t.dataset.k) return;
+    const k = tr.dataset.doc, l = docOf(k).lines[+tr.dataset.li];
+    if (t.dataset.k === "ref") l.ref = t.value || null;
+    else if (["qty", "price"].includes(t.dataset.k)) { l[t.dataset.k] = t.value.replace(",", "."); l.sum = ""; } // сумма пересчитается
+    else l[t.dataset.k] = t.value;
+    save(); k === "works" ? renderWorks() : renderAct();
+  });
+  $(sel).addEventListener("click", e => {
+    const b = e.target.closest("[data-ldel]"); if (!b) return;
+    const tr = b.closest("tr[data-doc]"), k = tr.dataset.doc; docOf(k).lines.splice(+tr.dataset.li, 1); save(); k === "works" ? renderWorks() : renderAct();
+  });
+}
+/* --- смета работ (вкладка «Смета», нижняя часть) --- */
+function renderWorks(){
+  const el = $("#works"); if (!el) return;
+  const D = docOf("works"), w = docSum(D), m = r2(summary().reduce((a, s) => a + s.sum, 0));
+  el.innerHTML = D.lines.length ? docHeader(D) + linesTable("works", D) + `
+    <div class="total">Итого по смете работ: ${money(w)}</div>
+    <div class="box" style="max-width:520px;margin-left:auto"><div class="metrics">
+      <span>Материалы (ваш расчёт)</span><b>${money(m)}</b><span>Работы (смета)</span><b>${money(w)}</b><span><b>Всего по объекту</b></span><b>${money(r2(m + w))}</b></div>
+      ${D.lines.some(l => l.kind === "material") ? `<div class="muted" style="font-size:12px;margin-top:4px">В смете работ есть строки «материал» — если это те же материалы, что в расчёте выше, они посчитаны дважды.</div>` : ""}</div>`
+    : `<div class="muted">Смета работ не загружена. Загрузите согласованную с заказчиком смету (PDF, фото или Excel) или добавьте строки вручную.</div>`;
+}
+$("#btnWorksLoad").onclick = () => $("#fileWorks").click();
+$("#fileWorks").onchange = e => { const f = [...e.target.files]; e.target.value = ""; if (f.length) loadDoc("works", f); };
+$("#btnWorksAdd").onclick = () => { docOf("works").lines.push(normLine({kind: "work"})); save(); renderWorks(); };
+$("#btnWorksClear").onclick = () => { if (docOf("works").lines.length && confirm("Очистить смету работ?")) { P.works = null; save(); renderWorks(); } };
+
+/* --- акт выполненных работ --- */
+function autoRef(){ // строки акта без привязки — ищем такую же строку в смете работ
+  const W = docOf("works").lines, A = docOf("act").lines, used = new Set(A.map(l => l.ref).filter(Boolean));
+  for (const l of A) {
+    if (l.ref && W.some(w => w.id === l.ref)) continue;
+    l.ref = null; const wl = new Set(words(l.name)); let best = null, bs = 0;
+    for (const w of W) { if (used.has(w.id)) continue; if (norm(w.name) === norm(l.name)) { best = w; bs = 9; break; }
+      const ww = words(w.name), s = ww.filter(x => wl.has(x)).length / Math.max(2, Math.max(wl.size, ww.length)); if (s > bs) { bs = s; best = w; } }
+    if (best && bs >= 0.6) { l.ref = best.id; used.add(best.id); }
   }
-});
+}
+function renderAct(){
+  const el = $("#act"); if (!el) return;
+  $("#actTitle").textContent = P.name ? "— " + P.name : "";
+  const W = docOf("works"), A = docOf("act"), byId = new Map(W.lines.map(w => [w.id, w]));
+  const plan = docSum(W), fact = docSum(A), diff = r2(fact - plan);
+  if (!A.lines.length) {
+    el.innerHTML = `<div class="empty">Акт пока пуст. ${W.lines.length ? "Нажмите «Заполнить из сметы работ» — строки сметы перенесутся сюда, останется поправить фактические объёмы и добавить доп. работы." : "Сначала загрузите смету работ на вкладке «2. Смета» или загрузите готовый акт."}</div>`;
+    return;
+  }
+  const refOpts = l => `<select data-k="ref" style="max-width:200px"><option value="">— доп. работа (нет в смете) —</option>${W.lines.map(w => `<option value="${w.id}" ${w.id === l.ref ? "selected" : ""}>${esc(w.name.slice(0, 60))}</option>`).join("")}</select>`;
+  const cols = {head: `<th>Строка сметы</th><th class="r">По смете</th><th class="r">Разница</th>`,
+    row: l => { const w = byId.get(l.ref), ws = w ? lineSum(w) : 0, d = r2(lineSum(l) - ws);
+      return `<td>${refOpts(l)}</td><td class="r">${w ? `${fmt(num(w.qty))} ${esc(w.unit)}<div class="muted" style="font-size:12px">${money(ws)}</div>` : "—"}</td>
+        <td class="r" style="color:${d > 0 ? "var(--bad)" : d < 0 ? "var(--ok)" : "inherit"}"><b>${d ? (d > 0 ? "+" : "") + money(d) : "0"}</b></td>`; }};
+  const linked = new Set(A.lines.map(l => l.ref).filter(Boolean)), notDone = W.lines.filter(w => !linked.has(w.id));
+  const extra = A.lines.filter(l => !l.ref);
+  el.innerHTML = `
+    <div class="box"><div class="metrics" style="max-width:560px">
+      <span>По смете работ (согласовано)</span><b>${money(plan)}</b>
+      <span>По акту (фактически выполнено)</span><b>${money(fact)}</b>
+      ${extra.length ? `<span>в т. ч. доп. работы, которых не было в смете</span><b>${money(docSum({lines: extra}))}</b>` : ""}
+      <span><b>${diff > 0 ? "Заказчику доплатить" : diff < 0 ? "Меньше сметы на (вернуть / не доплачивать)" : "Совпадает со сметой"}</b></span>
+      <b style="font-size:16px;color:${diff > 0 ? "var(--bad)" : "var(--ok)"}">${money(Math.abs(diff))}</b>
+    </div>${!W.lines.length ? `<div class="warn" style="font-size:12px;margin-top:4px">Смета работ не загружена — сравнивать не с чем (вкладка «2. Смета»).</div>` : ""}</div>
+    ${docHeader(A)}
+    <div class="muted" style="font-size:12px;margin-bottom:4px">«Кол-во» и «Цена» — фактические. Справа — что было в смете и разница: красным — дороже сметы, зелёным — дешевле.</div>
+    ${linesTable("act", A, cols)}
+    ${notDone.length ? `<h3>Есть в смете, но нет в акте (не выполнено?)</h3><ul>${notDone.map(w => `<li>${esc(w.name)} — ${fmt(num(w.qty))} ${esc(w.unit)}, ${money(lineSum(w))}</li>`).join("")}</ul>` : ""}`;
+}
+$("#btnActFill").onclick = () => {
+  const W = docOf("works"), A = docOf("act");
+  if (!W.lines.length) { toast("Сначала загрузите смету работ (вкладка 2)"); return; }
+  if (A.lines.length && !confirm("Заменить строки акта строками из сметы работ?")) return;
+  A.lines = W.lines.map(w => ({...normLine(w), ref: w.id, price: w.price !== "" ? w.price : (num(w.qty) ? r2(lineSum(w) / num(w.qty)) : ""), sum: num(w.qty) || w.price !== "" ? "" : w.sum}));
+  A.total = null; A.notes = ""; A.files = ""; save(); renderAct(); toast("Строки перенесены — поправьте фактические объёмы");
+};
+$("#btnActLoad").onclick = () => $("#fileAct").click();
+$("#fileAct").onchange = e => { const f = [...e.target.files]; e.target.value = ""; if (f.length) loadDoc("act", f); };
+$("#btnActAdd").onclick = () => { docOf("act").lines.push(normLine({kind: "work", section: "Дополнительные работы"})); save(); renderAct(); };
+$("#btnActClear").onclick = () => { if (docOf("act").lines.length && confirm("Очистить акт?")) { P.act = null; save(); renderAct(); } };
+$("#btnActPrint").onclick = () => { document.body.dataset.print = "act"; window.print(); setTimeout(() => delete document.body.dataset.print, 500); };
+$("#btnActExport").onclick = () => {
+  const W = docOf("works"), A = docOf("act"), byId = new Map(W.lines.map(w => [w.id, w])), title = P.name || "Объект";
+  const rows = [[`Акт выполненных работ — ${title}`], [], ["Раздел", "Наименование", "Ед.", "Кол-во", "Цена", "Сумма", "По смете: кол-во", "По смете: сумма", "Разница"]];
+  for (const l of A.lines) { const w = byId.get(l.ref); rows.push([l.section, l.name, l.unit, num(l.qty), num(l.price), lineSum(l), w ? num(w.qty) : "доп. работа", w ? lineSum(w) : 0, r2(lineSum(l) - (w ? lineSum(w) : 0))]); }
+  const plan = docSum(W), fact = docSum(A), diff = r2(fact - plan);
+  rows.push([], ["", "Итого по акту", "", "", "", fact], ["", "Итого по смете работ", "", "", "", plan], ["", diff >= 0 ? "Заказчику доплатить" : "Меньше сметы на", "", "", "", Math.abs(diff)]);
+  const wb = XLSX.utils.book_new(), ws = XLSX.utils.aoa_to_sheet(rows);
+  ws["!cols"] = [{wch: 16}, {wch: 50}, {wch: 7}, {wch: 9}, {wch: 10}, {wch: 12}, {wch: 14}, {wch: 14}, {wch: 12}];
+  XLSX.utils.book_append_sheet(wb, ws, "Акт"); XLSX.writeFile(wb, "Акт_" + title.replace(/[\\/:*?"<>|]+/g, "_").slice(0, 60) + ".xlsx");
+};
 
 /* ---------- Подбор материалов ИИ ---------- */
 let sug = null; // {step:"setup"|"result", rooms:Set, useClient, wish, list:[{room, it, on, why, dup}], missing, notes}
@@ -376,18 +453,18 @@ $("#btnSuggest").onclick = () => {
   if (!aiReady()) { toast("Сначала подключите ИИ"); openAI(); return; }
   if (!P.rooms.length) { toast("Сначала добавьте комнаты (вкладка 1)"); return; }
   if (!DB.items.length) { toast("Сначала загрузите базу материалов (вкладка 3)"); document.querySelector('[data-tab="DB"]').click(); return; }
-  sug = {step: "setup", rooms: new Set(P.rooms.map(r => r.id)), useClient: !!(P.client && P.client.lines.length), wish: sug?.wish || ""};
+  sug = {step: "setup", rooms: new Set(P.rooms.map(r => r.id)), useClient: docOf("works").lines.length > 0, wish: sug?.wish || ""};
   renderSug(); $("#sugModal").classList.add("on");
 };
 function renderSug(){
-  const el = $("#sugBody"), hasClient = !!(P.client && P.client.lines.length);
+  const el = $("#sugBody"), hasClient = docOf("works").lines.length > 0;
   if (sug.step === "setup") {
     el.innerHTML = `
-      <div class="muted" style="margin:8px 0">ИИ посмотрит на размеры комнат${hasClient ? ", смету заказчика" : ""} и ваши пожелания и предложит материалы <b>только из вашей базы</b>
+      <div class="muted" style="margin:8px 0">ИИ посмотрит на размеры комнат${hasClient ? ", смету работ" : ""} и ваши пожелания и предложит материалы <b>только из вашей базы</b>
       (${DB.items.length} поз.) с расходом и запасом. Вы проверите и отметите, что добавить.</div>
       <b>Комнаты</b>
       <div class="row" style="margin:6px 0 10px">${P.rooms.map(r => `<label class="row" style="gap:4px;border:1px solid var(--line);border-radius:8px;padding:4px 8px"><input type="checkbox" data-sroom="${r.id}" ${sug.rooms.has(r.id) ? "checked" : ""}> ${esc(r.name)}</label>`).join("")}</div>
-      <label class="row" style="gap:6px;margin-bottom:8px"><input type="checkbox" id="sugClient" ${sug.useClient ? "checked" : ""} ${hasClient ? "" : "disabled"}> Опираться на смету заказчика ${hasClient ? "" : "<span class='muted'>(не загружена — вкладка 4)</span>"}</label>
+      <label class="row" style="gap:6px;margin-bottom:8px"><input type="checkbox" id="sugClient" ${sug.useClient ? "checked" : ""} ${hasClient ? "" : "disabled"}> Опираться на смету работ ${hasClient ? "" : "<span class='muted'>(не загружена — внизу вкладки 2)</span>"}</label>
       <div><b>Пожелания</b> <span class="muted">(необязательно)</span></div>
       <textarea id="sugWish" rows="3" style="width:100%;margin-top:4px" placeholder="Например: в комнатах ламинат и обои под покраску, в санузле плитка на стены и пол, потолки натяжные">${esc(sug.wish)}</textarea>
       <div class="row" style="margin-top:10px"><button class="primary" id="sugGo">Подобрать</button></div>
@@ -452,14 +529,14 @@ function dbForPrompt(extraText){
 async function runSuggest(){
   const rooms = P.rooms.filter(r => sug.rooms.has(r.id));
   if (!rooms.length) { $("#sugMsg").innerHTML = `<div class="errbox">Отметьте хотя бы одну комнату.</div>`; return; }
-  const C = sug.useClient && P.client ? P.client.lines : [];
+  const C = sug.useClient ? docOf("works").lines : [];
   const roomData = rooms.map((r, k) => { const m = metrics(r); return {room: k, name: r.name, height: num(r.h),
     floor: r2(m.floor), walls: r2(m.walls), wallsGross: r2(m.wallsGross), ceiling: r2(m.ceiling), perim: r2(m.perim), plinth: r2(m.plinth),
     slopesWin: r2(m.slopesWin), slopesDoor: r2(m.slopesDoor), windows: m.windows, doors: m.doors, alreadyInEstimate: r.items.map(i => i.name)}; });
   const clientTxt = C.length ? C.map(l => `${l.section ? l.section + ": " : ""}${l.name} — ${num(l.qty)} ${l.unit}${l.kind === "work" ? " (работа)" : ""}`).join("\n") : "";
   const prompt = `Подбери материалы для ремонта из БАЗЫ ПОЛЬЗОВАТЕЛЯ для каждой комнаты.
 Комнаты (размеры в м, м², м.п.): ${JSON.stringify(roomData)}
-${clientTxt ? `Смета заказчика (ориентир, что заложено в работу):\n${clientTxt}\n` : ""}${sug.wish.trim() ? `Пожелания прораба: ${sug.wish.trim()}\n` : ""}
+${clientTxt ? `Согласованная смета работ (ориентир: какие работы и отделка заложены):\n${clientTxt}\n` : ""}${sug.wish.trim() ? `Пожелания прораба: ${sug.wish.trim()}\n` : ""}
 База пользователя (номер | наименование | ед. | цена | категория | расход | фасовка | считать по):
 ${dbForPrompt(clientTxt + " " + sug.wish)}
 
@@ -476,8 +553,8 @@ ${dbForPrompt(clientTxt + " " + sug.wish)}
 - reserve — запас в %: обычно 5–10, плитка 10–15, штучные (двери) 0.
 - base "custom" — когда нужно конкретное число штук (custom), например 1 унитаз; тогда rate 1.
 - Бери ТОЛЬКО позиции из базы по их номеру i, ничего не придумывай. Чего нет в базе, но нужно — в "missing".
-- Не дублируй то, что уже есть в alreadyInEstimate. Работы (услуги) добавляй, только если они есть в базе и упомянуты в смете заказчика или пожеланиях.
-- Если есть смета заказчика — подбирай под её состав (те же виды отделки), а не всё подряд.`;
+- Не дублируй то, что уже есть в alreadyInEstimate. Работы (услуги) добавляй, только если они есть в базе и упомянуты в смете работ или пожеланиях.
+- Если есть смета работ — подбирай материалы под эти работы (те же виды отделки), а не всё подряд.`;
   const res = await withBusy($("#sugMsg"), "ИИ подбирает материалы (обычно 20–90 секунд)", async signal => parseAIJSON(await callAI({signal, maxTokens: 16000,
     system: "Ты — опытный прораб и сметчик. Отвечаешь только JSON.", messages: [{role: "user", parts: [{text: prompt}]}]})));
   if (!res) return;
@@ -508,20 +585,21 @@ function projectContext(question){
   }; });
   const tm = totalMetrics();
   const common = P.common.map(it => { const c = itemCalc(it, tm); return {material: it.name, qty: c.qty, unit: it.unit, price: num(it.price), sum: c.sum}; });
-  const sum = summary(), C = P.client;
+  const sum = summary(), W = docOf("works"), A = docOf("act");
   let db;
   if (DB.items.length <= 400) db = DB.items.map(m => `${m.name} | ${m.unit} | ${m.price}`);
   else { const ws = words(question || ""); db = DB.items.filter(m => { const h = norm(m.name + " " + m.cat); return ws.some(w => h.includes(w)); }).slice(0, 120).map(m => `${m.name} | ${m.unit} | ${m.price}`); }
   return JSON.stringify({object: P.name || "", rooms, commonItems: common, purchaseSummary: sum.map(s => ({name: s.name, qty: s.qty, unit: s.unit, price: s.price, sum: s.sum})),
     ourTotal: r2(sum.reduce((a, s) => a + s.sum, 0)),
-    customerEstimate: C && C.lines.length ? {lines: C.lines.map(l => ({section: l.section, name: l.name, kind: l.kind, unit: l.unit, qty: num(l.qty), price: num(l.price), sum: lineSum(l)})), statedTotal: C.total} : null,
+    worksEstimate: W.lines.length ? {note: "согласованная с заказчиком смета работ", lines: W.lines.map(l => ({section: l.section, name: l.name, kind: l.kind, unit: l.unit, qty: num(l.qty), price: num(l.price), sum: lineSum(l)})), total: docSum(W)} : null,
+    act: A.lines.length ? {note: "акт выполненных работ (факт); planLine — строка сметы", lines: A.lines.map(l => ({name: l.name, unit: l.unit, qty: num(l.qty), price: num(l.price), sum: lineSum(l), planLine: W.lines.find(w => w.id === l.ref)?.name || "доп. работа"})), total: docSum(A), differenceToEstimate: r2(docSum(A) - docSum(W))} : null,
     priceBase: {totalItems: DB.items.length, file: DB.file, items: db, note: DB.items.length > 400 ? "показаны только позиции, похожие на вопрос" : "вся база"}});
 }
 const CHAT_SYSTEM = `Ты — помощник прораба в программе расчёта ремонта. Отвечай по-русски, коротко и по делу, простыми словами, с цифрами.
-Опирайся только на данные объекта из программы (они ниже в JSON): замеры комнат, расчёт материалов, смета заказчика, база цен пользователя.
-Цены не придумывай и не бери из интернета — только из базы пользователя и сметы. Если данных не хватает — так и скажи и подскажи, что внести в программу.
+Опирайся только на данные объекта из программы (они ниже в JSON): замеры комнат, расчёт материалов, согласованная смета работ, акт выполненных работ, база цен пользователя.
+Цены не придумывай и не бери из интернета — только из базы пользователя, сметы и акта. Если данных не хватает — так и скажи и подскажи, что внести в программу.
 Считай аккуратно, показывай расчёт кратко. Единицы: метры, м², м.п., рубли.`;
-const QUICK = ["Влезаем ли мы в смету заказчика?", "Что я мог забыть в расчёте?", "Проверь расход материалов — нет ли ошибок?", "Сколько всего стоят материалы по каждой комнате?"];
+const QUICK = ["Сколько заказчику доплатить по акту и за что?", "Что я мог забыть в расчёте?", "Проверь расход материалов — нет ли ошибок?", "Сколько всего стоят материалы по каждой комнате?"];
 function renderChat(){
   const log = $("#chatLog"); if (!log) return;
   const chat = P.chat || [];

@@ -51,7 +51,7 @@ h3{font-size:14px;margin:14px 0 6px}
 table{border-collapse:collapse;width:100%}
 th,td{padding:5px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
 th{font-weight:600;color:var(--muted);font-size:12px;white-space:nowrap}
-td.r,th.r{text-align:right}
+td.r,th.r{text-align:right;white-space:nowrap}
 .scrollx{overflow-x:auto;max-width:100%}
 .metrics{display:grid;grid-template-columns:1fr auto;gap:2px 12px;font-size:13px}
 .metrics b{text-align:right;font-variant-numeric:tabular-nums}
@@ -98,7 +98,9 @@ textarea{font:inherit;border:1px solid var(--line);border-radius:6px;padding:6px
 tr.over td{background:#fdecea}
 tr.under td{background:#eef8f2}
 @media print{
-  header,nav.tabs,.noprint,#pagePlan,#pageDB{display:none!important}
+  header,nav.tabs,.noprint,#pagePlan,#pageDB,#pageChat,#pageAct{display:none!important}
+  body[data-print=act] #pageEst{display:none!important} body[data-print=act] #pageAct{display:block!important} body[data-print=act] .printonly{display:block!important}
+  .est td input,.est td select{max-width:none}
   main{padding:0}.page{border:none;display:block!important;padding:0}
   .est input,.est select{border:none;padding:0;background:none;appearance:none}
 }
@@ -119,7 +121,7 @@ tr.under td{background:#eef8f2}
   <button data-tab="Plan" class="on">1. План и замеры</button>
   <button data-tab="Est">2. Смета</button>
   <button data-tab="DB">3. База материалов</button>
-  <button data-tab="Client">4. Смета заказчика</button>
+  <button data-tab="Act">4. Акт выполненных работ</button>
   <button data-tab="Chat">5. Чат с ИИ</button>
 </nav>
 <main>
@@ -157,7 +159,20 @@ tr.under td{background:#eef8f2}
     </div>
   </div>
   <div class="muted noprint" style="margin-bottom:10px">Материал добавляется в комнату из базы. Количество считается само: <b>основа</b> (например, площадь пола) × <b>расход на 1 ед.</b> + <b>запас %</b>, затем делится на <b>фасовку</b> и округляется вверх.</div>
+  <h2 style="margin:6px 0 8px">Материалы</h2>
   <div id="estimate"></div>
+  <div class="row" style="justify-content:space-between;margin:22px 0 8px;border-top:2px solid var(--line);padding-top:14px">
+    <h2 style="margin:0">Работы — согласованная смета</h2>
+    <div class="row noprint">
+      <button class="primary" id="btnWorksLoad">📷 Загрузить смету работ (PDF / фото / Excel)…</button>
+      <button id="btnWorksAdd">+ Строка</button>
+      <button class="danger" id="btnWorksClear">Очистить</button>
+      <input type="file" id="fileWorks" accept="application/pdf,image/*,.xlsx,.xls,.xlsm,.csv" multiple hidden>
+    </div>
+  </div>
+  <div class="muted noprint" style="margin-bottom:8px">Смета, которую компания составила и согласовала с заказчиком. Excel читается сразу, PDF и фото — с помощью ИИ. Потом по ней сверяется акт (вкладка 4).</div>
+  <div id="worksMsg"></div>
+  <div id="works"></div>
 </section>
 
 <section class="page" id="pageDB">
@@ -181,19 +196,23 @@ tr.under td{background:#eef8f2}
   <input id="dbSearch" placeholder="Поиск по базе: например «ламинат 33» или «шпаклёвка»" style="width:100%;margin-bottom:8px">
   <div class="scrollx" id="dbTable"></div>
 </section>
-<section class="page" id="pageClient">
-  <div class="row" style="justify-content:space-between;margin-bottom:8px">
-    <h2 style="margin:0">Смета заказчика и сравнение с расчётом</h2>
+<section class="page" id="pageAct">
+  <div class="row noprint" style="justify-content:space-between;margin-bottom:8px">
+    <h2 style="margin:0">Акт выполненных работ</h2>
     <div class="row">
-      <button class="primary" id="btnClientLoad">📷 Распознать смету (фото / PDF)…</button>
-      <button id="btnClientAdd">+ Строка вручную</button>
-      <button class="danger" id="btnClientClear">Очистить</button>
-      <input type="file" id="fileClient" accept="application/pdf,image/*" multiple hidden>
+      <button class="primary" id="btnActFill" title="Перенести строки из согласованной сметы работ и поправить факт">Заполнить из сметы работ</button>
+      <button id="btnActLoad">📷 Загрузить акт (PDF / фото / Excel)…</button>
+      <button id="btnActAdd">+ Доп. работа</button>
+      <button id="btnActExport">Скачать акт в Excel</button>
+      <button id="btnActPrint">Печать</button>
+      <button class="danger" id="btnActClear">Очистить</button>
+      <input type="file" id="fileAct" accept="application/pdf,image/*,.xlsx,.xls,.xlsm,.csv" multiple hidden>
     </div>
   </div>
-  <div class="muted" style="margin-bottom:10px">Сфотографируйте или загрузите смету, которую выдали на объект. ИИ перепишет её в таблицу — проверьте цифры. Ниже программа сравнит её с вашим расчётом.</div>
-  <div id="clientMsg"></div>
-  <div id="client"></div>
+  <div class="muted noprint" style="margin-bottom:10px">Итог по фактически выполненным работам. Программа сравнит его с согласованной сметой работ (вкладка «2. Смета») и покажет, сколько заказчику доплатить или на сколько вышло меньше.</div>
+  <h2 class="printonly" style="display:none">Акт выполненных работ <span id="actTitle"></span></h2>
+  <div id="actMsg"></div>
+  <div id="act"></div>
 </section>
 
 <section class="page" id="pageChat">
@@ -388,7 +407,7 @@ document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => {
   if (b.dataset.tab === "Est") renderEstimate();
   if (b.dataset.tab === "DB") renderDB();
   if (b.dataset.tab === "Plan") renderView();
-  if (b.dataset.tab === "Client") renderClient();
+  if (b.dataset.tab === "Act") renderAct();
   if (b.dataset.tab === "Chat") renderChat();
 });
 $("#pname").oninput = e => { P.name = e.target.value; save(); };
@@ -775,7 +794,8 @@ function renderEstimate(){
     `<h3>Сводная по материалам (что закупить на весь объект)</h3>
     ${sum.length ? `<div class="scrollx"><table><tr><th>Материал</th><th class="r">Количество</th><th>Ед.</th><th class="r">Цена</th><th class="r">Сумма</th></tr>
     ${sum.map(s => `<tr><td>${esc(s.name)}</td><td class="r">${fmt(s.qty)}</td><td>${esc(s.unit)}</td><td class="r">${money(s.price)}</td><td class="r">${money(s.sum)}</td></tr>`).join("")}</table></div>` : `<div class="muted">Пусто.</div>`}
-    <div class="total">Всего по объекту: ${money(grand)}</div>`;
+    <div class="total">Всего материалы по объекту: ${money(grand)}</div>`;
+  if (typeof renderWorks === "function") renderWorks();
 }
 function summary(){
   const map = new Map();
@@ -926,13 +946,16 @@ function loadDemo(){
   const byName = s => DB.items.find(m => norm(m.name).includes(norm(s)));
   for (const r of [a, b]) for (const s of ["Ламинат", "Подложка", "Плинтус напольный", "Шпаклёвка", "Грунтовка", "Обои", "Краска для потолков"]) { const m = byName(s); if (m) r.items.push(itemFromMat(m)); }
   for (const s of ["Плитка настенная", "Клей плиточный"]) { const m = byName(s); if (m) d.items.push(itemFromMat(m)); }
+  P.works = {lines: [["Демонтаж", "Демонтаж старых покрытий пола", "м²", 52, 180], ["Полы", "Укладка ламината", "м²", 49, 450], ["Полы", "Монтаж плинтуса", "м.п.", 47, 150],
+    ["Стены", "Шпаклёвка стен под обои", "м²", 140, 380], ["Стены", "Поклейка обоев", "м²", 125, 290], ["Санузел", "Укладка плитки на стены", "м²", 17, 1600], ["Потолки", "Покраска потолков", "м²", 52, 320]]
+    .map(([section, name, unit, qty, price]) => ({id: uid(), ref: null, section, name, unit, qty, price, sum: "", kind: "work"})), total: null, notes: "", files: "пример (выдуманные цифры)"};
   const door = byName("Дверь межкомнатная"); if (door) { const it = itemFromMat(door); it.base = "doors"; it.reserve = 0; P.common.push(it); }
   save();
 }
 
 /*__AI__*/
 /* ================= Старт ================= */
-function renderAll(){ $("#pname").value = P.name || ""; renderRoomList(); renderEditor(); vb = null; renderView(); if ($("#pageEst").classList.contains("on")) renderEstimate(); if ($("#pageDB").classList.contains("on")) renderDB(); if ($("#pageClient").classList.contains("on")) renderClient(); if ($("#pageChat").classList.contains("on")) renderChat(); renderRecReport(); }
+function renderAll(){ $("#pname").value = P.name || ""; renderRoomList(); renderEditor(); vb = null; renderView(); if ($("#pageEst").classList.contains("on")) renderEstimate(); if ($("#pageDB").classList.contains("on")) renderDB(); if ($("#pageAct").classList.contains("on")) renderAct(); if ($("#pageChat").classList.contains("on")) renderChat(); renderRecReport(); }
 renderAll();
 // на сайте — работа без интернета и установка на телефон (из файла на диске не используется)
 if (/^https?:$/.test(location.protocol) && "serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
