@@ -96,7 +96,7 @@ function renderAISettings(){
 }
 $("#btnAI").onclick = openAI;
 document.addEventListener("click", e => { const b = e.target.closest("[data-close]"); if (b) $("#" + b.dataset.close).classList.remove("on"); });
-for (const id of ["aiModal", "recModal"]) $("#" + id).addEventListener("click", e => { if (e.target.id === id) e.target.classList.remove("on"); });
+for (const id of ["aiModal", "recModal", "sugModal"]) $("#" + id).addEventListener("click", e => { if (e.target.id === id) e.target.classList.remove("on"); });
 $("#aiBody").addEventListener("input", e => { if (e.target.id === "aiKey") aiDraft.key = e.target.value; if (e.target.id === "aiModel") aiDraft.model = e.target.value; });
 $("#aiBody").addEventListener("change", e => { if (e.target.id === "aiPreset") { aiDraft.preset = e.target.value; aiDraft.model = AI_PRESETS[e.target.value].model || ""; aiNote = ""; renderAISettings(); } });
 $("#aiBody").addEventListener("click", async e => {
@@ -369,6 +369,134 @@ $("#client").addEventListener("click", async e => {
     save(); renderClient(); toast("Пары подобраны — проверьте");
   }
 });
+
+/* ---------- Подбор материалов ИИ ---------- */
+let sug = null; // {step:"setup"|"result", rooms:Set, useClient, wish, list:[{room, it, on, why, dup}], missing, notes}
+$("#btnSuggest").onclick = () => {
+  if (!aiReady()) { toast("Сначала подключите ИИ"); openAI(); return; }
+  if (!P.rooms.length) { toast("Сначала добавьте комнаты (вкладка 1)"); return; }
+  if (!DB.items.length) { toast("Сначала загрузите базу материалов (вкладка 3)"); document.querySelector('[data-tab="DB"]').click(); return; }
+  sug = {step: "setup", rooms: new Set(P.rooms.map(r => r.id)), useClient: !!(P.client && P.client.lines.length), wish: sug?.wish || ""};
+  renderSug(); $("#sugModal").classList.add("on");
+};
+function renderSug(){
+  const el = $("#sugBody"), hasClient = !!(P.client && P.client.lines.length);
+  if (sug.step === "setup") {
+    el.innerHTML = `
+      <div class="muted" style="margin:8px 0">ИИ посмотрит на размеры комнат${hasClient ? ", смету заказчика" : ""} и ваши пожелания и предложит материалы <b>только из вашей базы</b>
+      (${DB.items.length} поз.) с расходом и запасом. Вы проверите и отметите, что добавить.</div>
+      <b>Комнаты</b>
+      <div class="row" style="margin:6px 0 10px">${P.rooms.map(r => `<label class="row" style="gap:4px;border:1px solid var(--line);border-radius:8px;padding:4px 8px"><input type="checkbox" data-sroom="${r.id}" ${sug.rooms.has(r.id) ? "checked" : ""}> ${esc(r.name)}</label>`).join("")}</div>
+      <label class="row" style="gap:6px;margin-bottom:8px"><input type="checkbox" id="sugClient" ${sug.useClient ? "checked" : ""} ${hasClient ? "" : "disabled"}> Опираться на смету заказчика ${hasClient ? "" : "<span class='muted'>(не загружена — вкладка 4)</span>"}</label>
+      <div><b>Пожелания</b> <span class="muted">(необязательно)</span></div>
+      <textarea id="sugWish" rows="3" style="width:100%;margin-top:4px" placeholder="Например: в комнатах ламинат и обои под покраску, в санузле плитка на стены и пол, потолки натяжные">${esc(sug.wish)}</textarea>
+      <div class="row" style="margin-top:10px"><button class="primary" id="sugGo">Подобрать</button></div>
+      <div id="sugMsg"></div>`;
+    return;
+  }
+  const byRoom = new Map();
+  for (const x of sug.list) { if (!byRoom.has(x.room)) byRoom.set(x.room, []); byRoom.get(x.room).push(x); }
+  let total = 0;
+  const blocks = [...byRoom.entries()].map(([rid, xs]) => {
+    const r = rid === "common" ? null : room(rid), m = r ? metrics(r) : totalMetrics();
+    return `<h3>${esc(r ? r.name : "Общее на объект")}</h3><div class="scrollx"><table class="est">
+      <tr><th></th><th>Материал</th><th>Считать по</th><th class="r">Расход</th><th class="r">Запас, %</th><th class="r">Фасовка</th><th class="r">Нужно</th><th class="r">Сумма</th><th>Почему</th></tr>
+      ${xs.map(x => { const c = itemCalc(x.it, m); if (x.on) total += c.sum; const k = sug.list.indexOf(x);
+        return `<tr data-sg="${k}"><td><input type="checkbox" data-k="on" ${x.on ? "checked" : ""}></td>
+          <td>${esc(x.it.name)}${x.dup ? `<div class="warn" style="font-size:12px">уже есть в смете</div>` : ""}</td>
+          <td><select data-k="base">${Object.entries(BASES).map(([kk, [n, u]]) => `<option value="${kk}" ${x.it.base === kk ? "selected" : ""}>${n}${u ? ", " + u : ""}</option>`).join("")}</select>
+            ${x.it.base === "custom" ? `<input class="num" data-k="custom" value="${esc(x.it.custom)}">` : `<div class="muted" style="font-size:12px">= ${fmt(c.base)} ${BASES[x.it.base][1]}</div>`}</td>
+          <td class="r"><input class="num" data-k="rate" value="${esc(x.it.rate)}"></td>
+          <td class="r"><input class="num" data-k="reserve" value="${esc(x.it.reserve)}"></td>
+          <td class="r"><input class="num" data-k="pack" value="${esc(x.it.pack)}" placeholder="—"></td>
+          <td class="r"><b>${fmt(c.qty)}</b> ${esc(x.it.unit)}</td><td class="r">${money(c.sum)}</td>
+          <td class="muted" style="font-size:12px;min-width:160px">${esc(x.why)}</td></tr>`; }).join("")}</table></div>`;
+  }).join("");
+  el.innerHTML = `
+    ${sug.notes ? `<div class="box" style="background:#fffaf0;margin-top:8px">${esc(sug.notes)}</div>` : ""}
+    ${sug.list.length ? blocks : `<div class="empty">ИИ не нашёл подходящих материалов в базе.</div>`}
+    ${sug.missing.length ? `<h3>Нужно, но нет в вашей базе</h3><ul>${sug.missing.map(m => `<li>${esc(m.name)}${m.reason ? ` — <span class="muted">${esc(m.reason)}</span>` : ""}</li>`).join("")}</ul>` : ""}
+    <div class="total">Отмечено на сумму: ${money(r2(total))}</div>
+    <div class="row" style="justify-content:flex-end"><button id="sugBack">← Изменить пожелания</button><button class="primary" id="sugAdd">Добавить отмеченные в смету</button></div>`;
+}
+$("#sugBody").addEventListener("change", e => {
+  const t = e.target;
+  if (t.dataset.sroom) { t.checked ? sug.rooms.add(t.dataset.sroom) : sug.rooms.delete(t.dataset.sroom); return; }
+  if (t.id === "sugClient") { sug.useClient = t.checked; return; }
+  const tr = t.closest("tr[data-sg]"); if (!tr || !t.dataset.k) return;
+  const x = sug.list[+tr.dataset.sg];
+  if (t.dataset.k === "on") x.on = t.checked;
+  else { x.it[t.dataset.k] = t.tagName === "SELECT" ? t.value : t.value.replace(",", "."); if (t.dataset.k === "base" && t.value === "custom" && !num(x.it.custom)) x.it.custom = 1; }
+  renderSug();
+});
+$("#sugBody").addEventListener("input", e => { if (e.target.id === "sugWish") sug.wish = e.target.value; });
+$("#sugBody").addEventListener("click", e => {
+  if (e.target.id === "sugGo") runSuggest();
+  if (e.target.id === "sugBack") { sug.step = "setup"; renderSug(); }
+  if (e.target.id === "sugAdd") {
+    let n = 0;
+    for (const x of sug.list) if (x.on) { const items = x.room === "common" ? P.common : room(x.room)?.items; if (items) { items.push({...x.it, id: uid()}); n++; } }
+    save(); $("#sugModal").classList.remove("on"); renderEstimate(); toast(`Добавлено позиций: ${n}`);
+  }
+});
+function dbForPrompt(extraText){
+  const LIMIT = 1500;
+  let idx = DB.items.map((m, i) => i);
+  if (idx.length > LIMIT) { // большая база — сначала позиции, похожие на смету заказчика и пожелания
+    const ws = new Set(words(extraText));
+    const score = i => { const h = words(DB.items[i].name + " " + DB.items[i].cat); return h.filter(w => ws.has(w)).length; };
+    idx = idx.map(i => [i, score(i)]).sort((a, b) => b[1] - a[1]).slice(0, LIMIT).map(x => x[0]);
+  }
+  return idx.map(i => { const m = DB.items[i]; return [i, m.name, m.unit, num(m.price), m.cat, m.rate || "", m.pack || "", m.base || ""].join(" | "); }).join("\n");
+}
+async function runSuggest(){
+  const rooms = P.rooms.filter(r => sug.rooms.has(r.id));
+  if (!rooms.length) { $("#sugMsg").innerHTML = `<div class="errbox">Отметьте хотя бы одну комнату.</div>`; return; }
+  const C = sug.useClient && P.client ? P.client.lines : [];
+  const roomData = rooms.map((r, k) => { const m = metrics(r); return {room: k, name: r.name, height: num(r.h),
+    floor: r2(m.floor), walls: r2(m.walls), wallsGross: r2(m.wallsGross), ceiling: r2(m.ceiling), perim: r2(m.perim), plinth: r2(m.plinth),
+    slopesWin: r2(m.slopesWin), slopesDoor: r2(m.slopesDoor), windows: m.windows, doors: m.doors, alreadyInEstimate: r.items.map(i => i.name)}; });
+  const clientTxt = C.length ? C.map(l => `${l.section ? l.section + ": " : ""}${l.name} — ${num(l.qty)} ${l.unit}${l.kind === "work" ? " (работа)" : ""}`).join("\n") : "";
+  const prompt = `Подбери материалы для ремонта из БАЗЫ ПОЛЬЗОВАТЕЛЯ для каждой комнаты.
+Комнаты (размеры в м, м², м.п.): ${JSON.stringify(roomData)}
+${clientTxt ? `Смета заказчика (ориентир, что заложено в работу):\n${clientTxt}\n` : ""}${sug.wish.trim() ? `Пожелания прораба: ${sug.wish.trim()}\n` : ""}
+База пользователя (номер | наименование | ед. | цена | категория | расход | фасовка | считать по):
+${dbForPrompt(clientTxt + " " + sug.wish)}
+
+Верни ТОЛЬКО JSON:
+{"suggestions":[{"room":номер комнаты или -1 (на весь объект),"i":номер позиции из базы,
+  "base":"floor"|"ceiling"|"walls"|"wallsGross"|"perim"|"plinth"|"slopesWin"|"slopesDoor"|"windows"|"doors"|"volume"|"custom",
+  "custom":число|null,"rate":число,"pack":число|null,"reserve":число,"why":"кратко по-русски"}],
+ "missing":[{"name":"чего не хватает в базе","reason":"зачем нужно"}],
+ "notes":"кратко по-русски: общая логика подбора, на что обратить внимание"}
+Как считает программа: количество = основа(base) × rate × (1 + reserve/100), затем делится на pack и округляется вверх.
+- rate — расход в тех единицах, в которых считается pack (или в единицах товара, если pack нет). Пример: шпаклёвка 1.2 кг/м², мешок 25 кг → base "walls", rate 1.2, pack 25.
+  Ламинат в упаковках по 2.4 м² → base "floor", rate 1, pack 2.4. Плинтус 2.5 м/шт → base "plinth", rate 1, pack 2.5. Если ед. товара м² — rate 1, pack null.
+- Если в базе уже указаны расход/фасовка/считать по — используй их.
+- reserve — запас в %: обычно 5–10, плитка 10–15, штучные (двери) 0.
+- base "custom" — когда нужно конкретное число штук (custom), например 1 унитаз; тогда rate 1.
+- Бери ТОЛЬКО позиции из базы по их номеру i, ничего не придумывай. Чего нет в базе, но нужно — в "missing".
+- Не дублируй то, что уже есть в alreadyInEstimate. Работы (услуги) добавляй, только если они есть в базе и упомянуты в смете заказчика или пожеланиях.
+- Если есть смета заказчика — подбирай под её состав (те же виды отделки), а не всё подряд.`;
+  const res = await withBusy($("#sugMsg"), "ИИ подбирает материалы (обычно 20–90 секунд)", async signal => parseAIJSON(await callAI({signal, maxTokens: 16000,
+    system: "Ты — опытный прораб и сметчик. Отвечаешь только JSON.", messages: [{role: "user", parts: [{text: prompt}]}]})));
+  if (!res) return;
+  const list = [];
+  for (const s of res.suggestions || []) {
+    const m = DB.items[Math.round(num(s.i))]; if (!m || s.i === null || s.i === undefined) continue;
+    const k = Math.round(num(s.room)), r = k >= 0 ? rooms[k] : null; if (k >= 0 && !r) continue;
+    const it = itemFromMat(m);
+    if (BASES[s.base]) it.base = s.base;
+    if (it.base === "custom") it.custom = num(s.custom) > 0 ? num(s.custom) : 1;
+    if (num(s.rate) > 0) it.rate = num(s.rate);
+    if (s.pack != null) it.pack = num(s.pack) > 0 ? num(s.pack) : "";
+    if (s.reserve != null && num(s.reserve) >= 0 && num(s.reserve) <= 50) it.reserve = num(s.reserve);
+    const items = r ? r.items : P.common, dup = items.some(x => norm(x.name) === norm(it.name));
+    list.push({room: r ? r.id : "common", it, on: !dup, dup, why: String(s.why || "")});
+  }
+  sug.list = list; sug.missing = (res.missing || []).filter(x => x && x.name).map(x => ({name: String(x.name), reason: String(x.reason || "")}));
+  sug.notes = String(res.notes || ""); sug.step = "result"; renderSug();
+}
 
 /* ---------- Чат ---------- */
 function projectContext(question){

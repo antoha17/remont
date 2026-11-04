@@ -34,6 +34,13 @@ const path = require('path'), fs = require('fs');
     let text = 'работает';
     if (all.includes('Восстанови помещения')) text = '```json\n' + JSON.stringify(PLAN) + '\n```';
     else if (all.includes('Перепиши ВСЕ строки сметы')) text = JSON.stringify(CLIENT);
+    else if (all.includes('Подбери материалы')) text = JSON.stringify({suggestions: [
+      {room: 2, i: 0, base: 'floor', rate: 1, pack: 2.4, reserve: 10, why: 'ламинат как в комнатах'},
+      {room: 2, i: 5, base: 'walls', rate: 1, pack: 10.6, reserve: 10, why: 'обои'},
+      {room: 0, i: 0, base: 'floor', rate: 1, pack: 2.4, reserve: 10, why: 'дубль'},
+      {room: -1, i: 9, base: 'custom', custom: 2, rate: 1, pack: null, reserve: 0, why: 'входные'},
+      {room: 1, i: 999, base: 'floor', rate: 1, why: 'нет такой позиции'}],
+      missing: [{name: 'Затирка для швов', reason: 'для плитки в санузле'}], notes: 'Подобрано по аналогии с комнатами.'});
     else if (all.includes('Сопоставь материалы')) text = JSON.stringify({pairs: [{i: 0, j: 0}]});
     else if (body.messages[0].role === 'system' && body.messages[0].content.includes('Данные объекта')) text = 'По данным программы: **итого** ' + (body.messages[0].content.includes('Кухня') ? 'вижу кухню' : 'нет кухни');
     await new Promise(r => setTimeout(r, 300));
@@ -71,6 +78,16 @@ const path = require('path'), fs = require('fs');
   console.log('client:', (await page.textContent('#client .metrics')).replace(/\s+/g, ' '));
   await page.click('#btnAIMatch'); await page.waitForTimeout(1200);
   await page.screenshot({path: `${shots}/client.png`, fullPage: true});
+  // подбор материалов
+  await page.click('[data-tab="Est"]'); await page.click('#btnSuggest');
+  await page.fill('#sugWish', 'в коридоре ламинат и обои'); await page.click('#sugGo');
+  await page.waitForSelector('#sugAdd', {timeout: 20000});
+  console.log('suggest rows:', await page.locator('#sugBody tr[data-sg]').count(), 'checked:', await page.locator('#sugBody tr[data-sg] input[data-k=on]:checked').count());
+  console.log('suggest total:', await page.textContent('#sugBody .total'));
+  await page.screenshot({path: `${shots}/suggest.png`, fullPage: true});
+  const before = await page.evaluate(() => P.rooms[2].items.length + P.common.length);
+  await page.click('#sugAdd');
+  console.log('added:', await page.evaluate(b => P.rooms[2].items.length + P.common.length - b, before), 'corridor:', await page.evaluate(() => P.rooms[2].items.map(i => i.name + ' ' + itemCalc(i, metrics(P.rooms[2])).qty).join('; ')));
   // чат
   await page.click('[data-tab="Chat"]');
   await page.fill('#chatInput', 'Сколько стоит гостиная?'); await page.press('#chatInput', 'Enter');

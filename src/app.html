@@ -150,6 +150,7 @@ tr.under td{background:#eef8f2}
   <div class="row noprint" style="justify-content:space-between;margin-bottom:8px">
     <h2 style="margin:0">Смета по объекту</h2>
     <div class="row">
+      <button class="primary" id="btnSuggest" title="ИИ предложит материалы из вашей базы для каждой комнаты">🤖 Подобрать материалы ИИ</button>
       <button id="btnRefreshPrices" title="Подставить цены из загруженной базы">Обновить цены по базе</button>
       <button id="btnExport">Скачать смету в Excel</button>
       <button id="btnPrint">Печать</button>
@@ -215,6 +216,12 @@ tr.under td{background:#eef8f2}
   <div class="card">
     <div class="head"><b style="flex:1">Подключение ИИ</b><button data-close="aiModal">Закрыть</button></div>
     <div class="body" id="aiBody"></div>
+  </div>
+</div>
+<div class="modal" id="sugModal">
+  <div class="card" style="width:min(1000px,100%)">
+    <div class="head"><b style="flex:1">Подбор материалов с помощью ИИ</b><button data-close="sugModal">Закрыть</button></div>
+    <div class="body" id="sugBody"></div>
   </div>
 </div>
 <div class="modal" id="recModal">
