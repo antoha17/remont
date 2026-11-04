@@ -30,3 +30,24 @@ ws.append(["", "Стены"])
 ws.append([3, "Поклейка обоев", "м2", 40, 290, 11600])
 ws.append(["", "Итого по смете", "", "", "", 23300])
 out2 = os.path.join(os.path.dirname(out) or ".", "works.xlsx"); wb.save(out2); print(out2)
+
+# Смета-шаблон как у компании (выдуманные цифры): лист = помещение, колонка-отметка «1», повтор заголовков,
+# подразделы, «Итого по разделу», «ИТОГО ПО ПОМЕЩЕНИЮ», «СКИДКА 0.1»; отдельный лист без скидки; скрытый лист-прайс.
+wb = Workbook(); first = True
+for room, rows, disc in [
+    ("Кухня", [(1, "Демонтаж плинтуса", "м/п", 12, 100), (None, "Демонтаж паркета", "м2", 9, 200), (1, "Снятие обоев", "м2", 30, 150)], True),
+    ("Спецмонтаж", [(1, "Натяжной потолок", "м2", 20, 400), (None, "Кондиционер", "шт", 1, 9000)], False)]:
+    ws = wb.active if first else wb.create_sheet(room); ws.title = room; first = False
+    ws.append(["Площадь пола"]); ws.append([9]); ws.append([None, None, "Адрес объекта: (выдуманный)"])
+    ws.append([None, 1, "Демонтажные работы", "ед. изм.", "кол-во", "цена", "сумма", "цена", "сумма"])
+    ws.append([None, 1, "Полы"])
+    total = 0
+    for f, n, u, q, p in rows:
+        ws.append([None, f, n, u, q, p, q * p, p / 2, q * p / 2]); total += q * p if f == 1 else 0
+    ws.append([None, 1, "Итого по разделу(демонтажные работы)", None, None, None, total])
+    ws.append([None, 1, "ИТОГО ПО ПОМЕЩЕНИЮ. СТОИМОСТЬ РАБОТ", None, None, None, total])
+    if disc:
+        ws.append([None, None, "СКИДКА", None, None, None, 0.1]); ws.append([None, None, "ИТОГО ПО ПОМЕЩЕНИЮ С УЧЕТОМ СКИДКИ", None, None, None, total * 0.9])
+    ws.append([None, None, "Составлено:", None, "Согласовано:"])
+h = wb.create_sheet("Прайс для расчета"); h.sheet_state = "hidden"; h.append(["Наименование", "ед. изм.", "кол-во", "цена"]); h.append(["Работа из прайса", "м2", 1, 999])
+out3 = os.path.join(os.path.dirname(out) or ".", "works_flag.xlsx"); wb.save(out3); print(out3)

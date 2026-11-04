@@ -35,6 +35,7 @@ const path = require('path'), fs = require('fs');
     // загрузка прайса
     await page.click('[data-tab="DB"]');
     await page.setInputFiles('#fileDB', prices);
+    await page.waitForFunction(() => /prices/.test(DB.file), null, {timeout: 20000});
     console.log('db:', await page.evaluate(() => DB.items.map(m => `${m.cat}|${m.name}|${m.unit}|${m.price}|${m.rate}|${m.pack}`).join('\n')));
     await page.fill('#dbSearch', 'краска');
     await page.screenshot({path: `${shots}/db_${vp.width}.png`});

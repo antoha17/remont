@@ -192,7 +192,7 @@ tr.under td{background:#eef8f2}
     Названия колонок можно писать по-своему — программа ищет по смыслу. Если в файле несколько листов, загружаются все; название листа становится категорией, если колонки «Категория» нет.
     Цены берутся только из вашего файла — программа ничего не ищет в интернете.</div>
   </details>
-  <input id="dbSearch" placeholder="Поиск по базе: например «ламинат 33» или «шпаклёвка»" style="width:100%;margin-bottom:8px">
+  <div class="row" style="margin-bottom:8px;flex-wrap:nowrap"><input id="dbSearch" placeholder="Поиск по базе: например «ламинат 33» или «шпаклёвка»" style="flex:1"><select id="dbCat" style="max-width:45%;display:none"></select></div>
   <div class="scrollx" id="dbTable"></div>
 </section>
 <section class="page" id="pageAct">
@@ -394,7 +394,7 @@ function itemFromMat(mat){
   const base = mat.base || guessBase(mat.unit);
   return {id: uid(), name: mat.name, unit: mat.unit, price: mat.price, cat: mat.cat || "", code: mat.code || "",
           base, custom: base === "custom" ? 1 : "", rate: mat.rate || 1, pack: mat.pack || "", reserve: base === "custom" ? 0 : 10,
-          whole: WHOLE_UNITS.test(mat.unit || "")};
+          whole: WHOLE_UNITS.test(mat.unit || ""), weight: mat.weight || ""};
 }
 
 /* ================= Вкладки и шапка ================= */
@@ -791,13 +791,14 @@ function renderEstimate(){
     `<h3>Сводная по материалам (что закупить на весь объект)</h3>
     ${sum.length ? `<div class="scrollx"><table><tr><th>Материал</th><th class="r">Количество</th><th>Ед.</th><th class="r">Цена</th><th class="r">Сумма</th></tr>
     ${sum.map(s => `<tr><td>${esc(s.name)}</td><td class="r">${fmt(s.qty)}</td><td>${esc(s.unit)}</td><td class="r">${money(s.price)}</td><td class="r">${money(s.sum)}</td></tr>`).join("")}</table></div>` : `<div class="muted">Пусто.</div>`}
-    <div class="total">Всего материалы по объекту: ${money(grand)}</div>`;
+    <div class="total">Всего материалы по объекту: ${money(grand)}</div>
+    ${sum.some(s => s.kg) ? `<div class="muted" style="text-align:right">Общий вес материалов (где вес указан в базе): <b>${fmt(sum.reduce((a, s) => a + s.kg, 0), 0)} кг</b> — для расчёта доставки и подъёма</div>` : ""}`;
   if (typeof renderWorks === "function") renderWorks();
 }
 function summary(){
   const map = new Map();
   const add = (items, m) => items.forEach(it => { const c = itemCalc(it, m), k = norm(it.name) + "|" + norm(it.unit) + "|" + num(it.price);
-    const s = map.get(k) || {name: it.name, unit: it.unit, price: num(it.price), qty: 0, sum: 0}; s.qty = r2(s.qty + c.qty); s.sum = r2(s.sum + c.sum); map.set(k, s); });
+    const s = map.get(k) || {name: it.name, unit: it.unit, price: num(it.price), qty: 0, sum: 0, kg: 0}; s.qty = r2(s.qty + c.qty); s.sum = r2(s.sum + c.sum); s.kg = r2(s.kg + c.qty * num(it.weight)); map.set(k, s); });
   P.rooms.forEach(r => add(r.items, metrics(r))); add(P.common, totalMetrics());
   return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, "ru"));
 }
@@ -871,44 +872,62 @@ $("#pickList").onclick = e => {
 $("#btnLoadDB").onclick = () => $("#fileDB").click();
 $("#fileDB").onchange = async e => {
   const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+  $("#dbInfo").innerHTML = `<div class="busy">Читаю «${esc(f.name)}»… большие файлы с картинками — до минуты</div>`;
+  await new Promise(r => setTimeout(r, 50));
   try {
-    const wb = XLSX.read(await f.arrayBuffer(), {type: "array"});
-    const items = []; const skipped = [];
-    for (const sn of wb.SheetNames) { const r = parseSheet(wb.Sheets[sn], sn); if (r) items.push(...r); else skipped.push(sn); }
-    if (!items.length) { alert("Не нашёл в файле таблицу с колонками «Наименование» и «Цена». Скачайте образец на этой вкладке."); return; }
-    DB = {items, file: f.name, loaded: new Date().toLocaleString("ru-RU")}; saveDB(); renderDB();
-    toast(`Загружено позиций: ${items.length}` + (skipped.length ? ` (пропущены листы: ${skipped.join(", ")})` : ""));
-  } catch(err) { alert("Не удалось прочитать файл: " + err.message); }
+    const wb = XLSX.read(await f.arrayBuffer(), {type: "array", bookImages: false, cellStyles: false});
+    const vis = wb.SheetNames.filter((sn, i) => !(wb.Workbook?.Sheets?.[i]?.Hidden)); // скрытые листы не читаем
+    const parts = vis.map(sn => ({sn, items: parseSheet(wb.Sheets[sn])})).filter(x => x.items);
+    const items = [];
+    for (const x of parts) for (const m of x.items) { if (!m.cat && parts.length > 1) m.cat = x.sn; items.push(m); }
+    if (!items.length) { renderDB(); alert("Не нашёл в файле таблицу с колонками «Наименование» и «Цена». Скачайте образец на этой вкладке."); return; }
+    DB = {items, file: f.name, loaded: new Date().toLocaleString("ru-RU")}; saveDB(); dbShow = DBPAGE; $("#dbCat").value = ""; renderDB();
+    toast(`Загружено позиций: ${items.length}`);
+  } catch(err) { renderDB(); alert("Не удалось прочитать файл: " + err.message); }
 };
-function parseSheet(ws, sheetName){
+/* Разбор прайса. Понимает: шапку документа над таблицей, строки-разделы (в т. ч. с повтором заголовков
+   «ед. изм. / кол-во / цена»), строки «Итого…», «Скидка», колонку ID/артикул, вес. */
+function parseSheet(ws){
   const rows = XLSX.utils.sheet_to_json(ws, {header: 1, raw: true, defval: ""});
-  const find = (row, re) => row.findIndex(c => re.test(norm(c)));
-  for (let h = 0; h < Math.min(25, rows.length); h++) {
-    const row = rows[h], cName = find(row, /наимен|название|материал|товар|номенклат|позиция/), cPrice = find(row, /цена|стоим|руб/);
+  const find = (row, re, not) => row.findIndex((c, i) => typeof c === "string" && re.test(norm(c)) && !(not || []).includes(i));
+  const HEADWORD = /^(ед\.?\s*изм\.?|ед\.?|кол-?во|количество|цена|сумма|стоимость|вес.*)$/;
+  for (let h = 0; h < Math.min(40, rows.length); h++) {
+    const row = rows[h], cName = find(row, /наимен|название|материал|товар|номенклат|позиция/), cPrice = [find(row, /цена|стоим.*ед/), find(row, /стоим|руб/)].find(i => i >= 0) ?? -1;
     if (cName < 0 || cPrice < 0) continue;
-    const col = {name: cName, price: cPrice, unit: find(row, /^ед|ед\.|единиц|изм/), cat: find(row, /катег|раздел|групп|вид/), code: find(row, /артик|код/),
-                 rate: find(row, /расход|норма/), pack: find(row, /фасов|упаков|в уп|объем уп|вес уп/), base: find(row, /считать|на что|основ|примен/)};
+    const col = {name: cName, price: cPrice, unit: find(row, /^ед|ед\.|единиц|изм/), cat: find(row, /катег|раздел|групп/), code: find(row, /^id$|^№ ?п|артик|код/),
+                 rate: find(row, /расход|норма/), pack: find(row, /фасов|упаков|в уп|объем уп|вес уп/), base: find(row, /считать|на что|основ|примен/), weight: find(row, /^вес|вес за ед|вес ед/, [])};
+    if (col.weight >= 0 && /итого/.test(norm(row[col.weight]))) col.weight = -1;
     const out = []; let cat = "";
     for (const r of rows.slice(h + 1)) {
       const name = String(r[col.name] ?? "").trim(), price = num(r[col.price]);
-      const filled = r.map(c => String(c).trim()).filter(Boolean);
-      if (!name) { if (filled.length === 1 && !num(filled[0])) cat = filled[0]; continue; } // строка-заголовок раздела
-      if (!price && r.filter(c => String(c).trim()).length === 1) { cat = name; continue; } // строка-заголовок раздела
-      out.push({name, price, unit: col.unit >= 0 ? String(r[col.unit]).trim() : "", cat: col.cat >= 0 && String(r[col.cat]).trim() ? String(r[col.cat]).trim() : (cat || (sheetName && !/^лист|sheet/i.test(sheetName) ? sheetName : "")),
-                code: col.code >= 0 ? String(r[col.code]).trim() : "", rate: col.rate >= 0 ? num(r[col.rate]) || "" : "", pack: col.pack >= 0 ? num(r[col.pack]) || "" : "", base: col.base >= 0 ? parseBaseWord(r[col.base]) : ""});
+      const texts = r.map(c => String(c).trim()).filter(c => c && !/^-?\d+([.,]\d+)?$/.test(c)); // текстовые ячейки
+      if (/^(итого|всего|скидка|ндс|в т\.? ?ч)/i.test(name) || /^(итого|всего)/i.test(texts[0] || "")) continue;
+      const unitTxt = col.unit >= 0 ? String(r[col.unit]).trim() : "";
+      if (HEADWORD.test(norm(unitTxt)) || HEADWORD.test(norm(r[col.price]))) { cat = name || texts.find(t => !HEADWORD.test(norm(t))) || cat; continue; } // раздел с повтором заголовков
+      if (!name) { if (texts.length === 1) cat = texts[0]; continue; }
+      if (!price && (texts.length === 1 || !unitTxt)) { cat = name; continue; } // строка-раздел (без цены и единицы)
+      out.push({name, price, unit: unitTxt, cat: col.cat >= 0 && String(r[col.cat]).trim() ? String(r[col.cat]).trim() : cat,
+                code: col.code >= 0 ? String(r[col.code]).trim() : "", rate: col.rate >= 0 ? num(r[col.rate]) || "" : "", pack: col.pack >= 0 ? num(r[col.pack]) || "" : "",
+                base: col.base >= 0 ? parseBaseWord(r[col.base]) : "", weight: col.weight >= 0 ? num(r[col.weight]) || "" : ""});
     }
     return out.length ? out : null;
   }
   return null;
 }
+const DBPAGE = 300; let dbShow = DBPAGE;
 function renderDB(){
-  $("#dbInfo").innerHTML = DB.items.length ? `Загружено <b>${DB.items.length}</b> позиций из файла «${esc(DB.file)}» (${esc(DB.loaded)}). База хранится в этом браузере на этом компьютере; чтобы обновить цены — загрузите файл заново.` : `База пуста. Загрузите свой Excel с материалами и ценами.`;
-  const list = searchDB($("#dbSearch").value, 300);
-  $("#dbTable").innerHTML = DB.items.length ? `<table><tr><th>Категория</th><th>Наименование</th><th>Ед.</th><th class="r">Цена</th><th class="r">Расход</th><th class="r">Фасовка</th><th>Считать по</th></tr>
-    ${list.map(m => `<tr><td class="muted">${esc(m.cat)}</td><td>${esc(m.name)}${m.code ? ` <span class="pill">${esc(m.code)}</span>` : ""}</td><td>${esc(m.unit)}</td><td class="r">${money(num(m.price))}</td><td class="r">${m.rate || ""}</td><td class="r">${m.pack || ""}</td><td class="muted">${m.base ? BASES[m.base][0] : ""}</td></tr>`).join("")}</table>
-    ${list.length >= 300 ? `<div class="muted">Показаны первые 300 — уточните поиск.</div>` : ""}` : "";
+  $("#dbInfo").innerHTML = DB.items.length ? `Загружено <b>${DB.items.length}</b> позиций из файла «${esc(DB.file)}» (${esc(DB.loaded)}). База хранится в этом браузере на этом устройстве; чтобы обновить цены — загрузите файл заново.` : `База пуста. Загрузите свой Excel с материалами и ценами.`;
+  const cats = [...new Set(DB.items.map(m => m.cat).filter(Boolean))], sel = $("#dbCat");
+  if (sel.dataset.sig !== cats.join("|")) { const v = sel.value; sel.innerHTML = `<option value="">Все разделы (${cats.length})</option>` + cats.map(c => `<option>${esc(c)}</option>`).join(""); sel.value = cats.includes(v) ? v : ""; sel.dataset.sig = cats.join("|"); }
+  sel.style.display = cats.length > 1 ? "" : "none";
+  const cat = sel.value, all = searchDB($("#dbSearch").value, Infinity).filter(m => !cat || m.cat === cat), list = all.slice(0, dbShow), hasW = DB.items.some(m => m.weight);
+  $("#dbTable").innerHTML = DB.items.length ? `<div class="muted" style="margin-bottom:4px">Найдено: ${all.length}</div><table><tr><th>Раздел</th><th>Наименование</th><th>Ед.</th><th class="r">Цена</th>${hasW ? `<th class="r">Вес, кг</th>` : ""}<th class="r">Расход</th><th class="r">Фасовка</th><th>Считать по</th></tr>
+    ${list.map(m => `<tr><td class="muted">${esc(m.cat)}</td><td>${esc(m.name)}${m.code ? ` <span class="pill">${esc(m.code)}</span>` : ""}</td><td>${esc(m.unit)}</td><td class="r">${money(num(m.price))}</td>${hasW ? `<td class="r">${m.weight || ""}</td>` : ""}<td class="r">${m.rate || ""}</td><td class="r">${m.pack || ""}</td><td class="muted">${m.base ? BASES[m.base][0] : ""}</td></tr>`).join("")}</table>
+    ${all.length > list.length ? `<div class="row" style="margin-top:8px"><span class="muted">Показано ${list.length} из ${all.length}</span><button class="small" id="dbMore">Показать ещё ${Math.min(DBPAGE, all.length - list.length)}</button><button class="small" id="dbAll">Показать все</button></div>` : ""}` : "";
 }
-$("#dbSearch").oninput = renderDB;
+$("#dbTable").addEventListener("click", e => { if (e.target.id === "dbMore") { dbShow += DBPAGE; renderDB(); } if (e.target.id === "dbAll") { dbShow = Infinity; renderDB(); } });
+$("#dbCat").onchange = () => { dbShow = DBPAGE; renderDB(); };
+$("#dbSearch").oninput = () => { dbShow = DBPAGE; renderDB(); };
 $("#btnClearDB").onclick = () => { if (DB.items.length && confirm("Очистить загруженную базу? Сметы объектов не пострадают.")) { DB = {items: [], file: "", loaded: ""}; saveDB(); renderDB(); } };
 const TEMPLATE = [
   ["Категория", "Наименование", "Ед. изм.", "Цена", "Расход", "Фасовка", "Считать по", "Артикул"],
