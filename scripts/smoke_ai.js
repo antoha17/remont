@@ -81,12 +81,13 @@ const path = require('path'), fs = require('fs');
   await page.waitForFunction(() => docOf('works').lines.length === 4, null, {timeout: 20000});
   console.log('works by AI:', await page.evaluate(() => docSum(docOf('works'))));
   await page.click('[data-tab="Act"]'); await page.click('#btnActFill');
-  // факт: ламината уложили 10 уп вместо 9, вывоз мусора 2 рейса, доп. работа
-  await page.locator('#act tr[data-li="0"] input[data-k=qty]').fill('10'); await page.locator('#act tr[data-li="0"] input[data-k=qty]').dispatchEvent('change');
+  // факт: укладка ламината 23 м2 вместо 21, доп. работа; материалы в акт не попадают
+  await page.locator('#act tr[data-li="0"] input[data-k=qty]').fill('23'); await page.locator('#act tr[data-li="0"] input[data-k=qty]').dispatchEvent('change');
   await page.click('#btnActAdd');
-  await page.locator('#act tr[data-li="4"] input[data-k=name]').fill('Выравнивание стены'); await page.locator('#act tr[data-li="4"] input[data-k=name]').dispatchEvent('change');
-  await page.locator('#act tr[data-li="4"] input[data-k=qty]').fill('3'); await page.locator('#act tr[data-li="4"] input[data-k=qty]').dispatchEvent('change');
-  await page.locator('#act tr[data-li="4"] input[data-k=price]').fill('700'); await page.locator('#act tr[data-li="4"] input[data-k=price]').dispatchEvent('change');
+  await page.locator('#act tr[data-li="2"] input[data-k=name]').fill('Выравнивание стены'); await page.locator('#act tr[data-li="2"] input[data-k=name]').dispatchEvent('change');
+  await page.locator('#act tr[data-li="2"] input[data-k=qty]').fill('3'); await page.locator('#act tr[data-li="2"] input[data-k=qty]').dispatchEvent('change');
+  await page.locator('#act tr[data-li="2"] input[data-k=price]').fill('700'); await page.locator('#act tr[data-li="2"] input[data-k=price]').dispatchEvent('change');
+  console.log('act lines:', await page.evaluate(() => docOf('act').lines.map(l => l.name).join(', ')));
   console.log('act:', (await page.textContent('#act .metrics')).replace(/\s+/g, ' '));
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#btnActExport')]); console.log('act export:', dl.suggestedFilename());
   await page.screenshot({path: `${shots}/act.png`, fullPage: true});

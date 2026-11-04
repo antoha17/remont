@@ -99,7 +99,6 @@ tr.over td{background:#fdecea}
 tr.under td{background:#eef8f2}
 @media print{
   header,nav.tabs,.noprint,#pagePlan,#pageDB,#pageChat,#pageAct{display:none!important}
-  body[data-print=act] #pageEst{display:none!important} body[data-print=act] #pageAct{display:block!important} body[data-print=act] .printonly{display:block!important}
   .est td input,.est td select{max-width:none}
   main{padding:0}.page{border:none;display:block!important;padding:0}
   .est input,.est select{border:none;padding:0;background:none;appearance:none}
@@ -204,13 +203,11 @@ tr.under td{background:#eef8f2}
       <button id="btnActLoad">📷 Загрузить акт (PDF / фото / Excel)…</button>
       <button id="btnActAdd">+ Доп. работа</button>
       <button id="btnActExport">Скачать акт в Excel</button>
-      <button id="btnActPrint">Печать</button>
       <button class="danger" id="btnActClear">Очистить</button>
       <input type="file" id="fileAct" accept="application/pdf,image/*,.xlsx,.xls,.xlsm,.csv" multiple hidden>
     </div>
   </div>
-  <div class="muted noprint" style="margin-bottom:10px">Итог по фактически выполненным работам. Программа сравнит его с согласованной сметой работ (вкладка «2. Смета») и покажет, сколько заказчику доплатить или на сколько вышло меньше.</div>
-  <h2 class="printonly" style="display:none">Акт выполненных работ <span id="actTitle"></span></h2>
+  <div class="muted noprint" style="margin-bottom:10px">Итог по фактически выполненным работам (только работы, без материалов). Программа сравнит его с работами из согласованной сметы (вкладка «2. Смета») и покажет, сколько заказчику доплатить или на сколько вышло меньше.</div>
   <div id="actMsg"></div>
   <div id="act"></div>
 </section>

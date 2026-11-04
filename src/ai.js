@@ -273,6 +273,7 @@ function docOf(k){
 const DOC_NAME = {works: "смета работ", act: "акт выполненных работ"};
 const lineSum = l => (l.sum !== "" && l.sum != null) ? num(l.sum) : r2(num(l.qty) * num(l.price));
 const docSum = d => r2(d.lines.reduce((a, l) => a + lineSum(l), 0));
+const workLines = d => d.lines.filter(l => l.kind !== "material"); // акт сравнивает только работы (и прочее), без материалов
 const KIND = {work: "работа", material: "материал", other: "прочее"};
 function words(s){ return norm(s).replace(/[^a-zа-я0-9 ]/g, " ").split(" ").filter(w => w.length > 2 && !/^(для|под|без|мм|шт)$/.test(w)).map(w => w.slice(0, 5)); }
 const DOC_PROMPT = what => `На изображениях — ${what} (или его часть) по ремонту квартиры: работы и, возможно, материалы. Перепиши ВСЕ строки в таблицу.
@@ -333,15 +334,16 @@ async function loadDoc(k, files){
     res.lines = (res.lines || []).filter(l => l && l.name).map(normLine);
   }
   D.lines = res.lines; D.total = res.total == null ? null : num(res.total); D.notes = String(res.notes || ""); D.files = files.map(f => f.name).join(", ");
-  if (k === "act") autoRef();
+  if (k === "act") { const n = D.lines.length; D.lines = workLines(D); if (n > D.lines.length) toast(`Строки материалов (${n - D.lines.length}) пропущены — в акте только работы`); autoRef(); }
   save(); k === "works" ? renderWorks() : renderAct(); toast(`Строк: ${D.lines.length}`);
 }
 function linesTable(k, D, cols){
-  return `<div class="scrollx"><table class="est"><tr><th>Раздел</th><th>Наименование</th><th>Тип</th><th>Ед.</th><th class="r">Кол-во</th><th class="r">Цена</th><th class="r">Сумма</th>${cols ? cols.head : ""}<th></th></tr>
+  const kindCol = k !== "act";
+  return `<div class="scrollx"><table class="est"><tr><th>Раздел</th><th>Наименование</th>${kindCol ? "<th>Тип</th>" : ""}<th>Ед.</th><th class="r">Кол-во</th><th class="r">Цена</th><th class="r">Сумма</th>${cols ? cols.head : ""}<th></th></tr>
     ${D.lines.map((l, i) => `<tr data-doc="${k}" data-li="${i}">
       <td><input data-k="section" value="${esc(l.section)}" style="width:110px"></td>
       <td><input data-k="name" value="${esc(l.name)}" style="width:260px"></td>
-      <td><select data-k="kind">${Object.entries(KIND).map(([kk, v]) => `<option value="${kk}" ${l.kind === kk ? "selected" : ""}>${v}</option>`).join("")}</select></td>
+      ${kindCol ? `<td><select data-k="kind">${Object.entries(KIND).map(([kk, v]) => `<option value="${kk}" ${l.kind === kk ? "selected" : ""}>${v}</option>`).join("")}</select></td>` : ""}
       <td><input data-k="unit" value="${esc(l.unit)}" style="width:56px"></td>
       <td class="r"><input class="num" data-k="qty" value="${esc(l.qty)}" inputmode="decimal"></td>
       <td class="r"><input class="num" data-k="price" value="${esc(l.price)}" inputmode="decimal"></td>
@@ -386,7 +388,7 @@ $("#btnWorksClear").onclick = () => { if (docOf("works").lines.length && confirm
 
 /* --- акт выполненных работ --- */
 function autoRef(){ // строки акта без привязки — ищем такую же строку в смете работ
-  const W = docOf("works").lines, A = docOf("act").lines, used = new Set(A.map(l => l.ref).filter(Boolean));
+  const W = workLines(docOf("works")), A = docOf("act").lines, used = new Set(A.map(l => l.ref).filter(Boolean));
   for (const l of A) {
     if (l.ref && W.some(w => w.id === l.ref)) continue;
     l.ref = null; const wl = new Set(words(l.name)); let best = null, bs = 0;
@@ -397,9 +399,8 @@ function autoRef(){ // строки акта без привязки — ище�
 }
 function renderAct(){
   const el = $("#act"); if (!el) return;
-  $("#actTitle").textContent = P.name ? "— " + P.name : "";
-  const W = docOf("works"), A = docOf("act"), byId = new Map(W.lines.map(w => [w.id, w]));
-  const plan = docSum(W), fact = docSum(A), diff = r2(fact - plan);
+  const W0 = docOf("works"), W = {lines: workLines(W0)}, A = docOf("act"), byId = new Map(W.lines.map(w => [w.id, w]));
+  const plan = docSum(W), fact = docSum(A), diff = r2(fact - plan), matCount = W0.lines.length - W.lines.length;
   if (!A.lines.length) {
     el.innerHTML = `<div class="empty">Акт пока пуст. ${W.lines.length ? "Нажмите «Заполнить из сметы работ» — строки сметы перенесутся сюда, останется поправить фактические объёмы и добавить доп. работы." : "Сначала загрузите смету работ на вкладке «2. Смета» или загрузите готовый акт."}</div>`;
     return;
@@ -418,14 +419,15 @@ function renderAct(){
       ${extra.length ? `<span>в т. ч. доп. работы, которых не было в смете</span><b>${money(docSum({lines: extra}))}</b>` : ""}
       <span><b>${diff > 0 ? "Заказчику доплатить" : diff < 0 ? "Меньше сметы на (вернуть / не доплачивать)" : "Совпадает со сметой"}</b></span>
       <b style="font-size:16px;color:${diff > 0 ? "var(--bad)" : "var(--ok)"}">${money(Math.abs(diff))}</b>
-    </div>${!W.lines.length ? `<div class="warn" style="font-size:12px;margin-top:4px">Смета работ не загружена — сравнивать не с чем (вкладка «2. Смета»).</div>` : ""}</div>
+    </div>${!W.lines.length ? `<div class="warn" style="font-size:12px;margin-top:4px">Смета работ не загружена — сравнивать не с чем (вкладка «2. Смета»).</div>` : ""}
+    ${matCount ? `<div class="muted" style="font-size:12px;margin-top:4px">Строки материалов из сметы (${matCount}) в акте не участвуют — сравниваются только работы.</div>` : ""}</div>
     ${docHeader(A)}
     <div class="muted" style="font-size:12px;margin-bottom:4px">«Кол-во» и «Цена» — фактические. Справа — что было в смете и разница: красным — дороже сметы, зелёным — дешевле.</div>
     ${linesTable("act", A, cols)}
     ${notDone.length ? `<h3>Есть в смете, но нет в акте (не выполнено?)</h3><ul>${notDone.map(w => `<li>${esc(w.name)} — ${fmt(num(w.qty))} ${esc(w.unit)}, ${money(lineSum(w))}</li>`).join("")}</ul>` : ""}`;
 }
 $("#btnActFill").onclick = () => {
-  const W = docOf("works"), A = docOf("act");
+  const W = {lines: workLines(docOf("works"))}, A = docOf("act");
   if (!W.lines.length) { toast("Сначала загрузите смету работ (вкладка 2)"); return; }
   if (A.lines.length && !confirm("Заменить строки акта строками из сметы работ?")) return;
   A.lines = W.lines.map(w => ({...normLine(w), ref: w.id, price: w.price !== "" ? w.price : (num(w.qty) ? r2(lineSum(w) / num(w.qty)) : ""), sum: num(w.qty) || w.price !== "" ? "" : w.sum}));
@@ -435,9 +437,8 @@ $("#btnActLoad").onclick = () => $("#fileAct").click();
 $("#fileAct").onchange = e => { const f = [...e.target.files]; e.target.value = ""; if (f.length) loadDoc("act", f); };
 $("#btnActAdd").onclick = () => { docOf("act").lines.push(normLine({kind: "work", section: "Дополнительные работы"})); save(); renderAct(); };
 $("#btnActClear").onclick = () => { if (docOf("act").lines.length && confirm("Очистить акт?")) { P.act = null; save(); renderAct(); } };
-$("#btnActPrint").onclick = () => { document.body.dataset.print = "act"; window.print(); setTimeout(() => delete document.body.dataset.print, 500); };
 $("#btnActExport").onclick = () => {
-  const W = docOf("works"), A = docOf("act"), byId = new Map(W.lines.map(w => [w.id, w])), title = P.name || "Объект";
+  const W = {lines: workLines(docOf("works"))}, A = docOf("act"), byId = new Map(W.lines.map(w => [w.id, w])), title = P.name || "Объект";
   const rows = [[`Акт выполненных работ — ${title}`], [], ["Раздел", "Наименование", "Ед.", "Кол-во", "Цена", "Сумма", "По смете: кол-во", "По смете: сумма", "Разница"]];
   for (const l of A.lines) { const w = byId.get(l.ref); rows.push([l.section, l.name, l.unit, num(l.qty), num(l.price), lineSum(l), w ? num(w.qty) : "доп. работа", w ? lineSum(w) : 0, r2(lineSum(l) - (w ? lineSum(w) : 0))]); }
   const plan = docSum(W), fact = docSum(A), diff = r2(fact - plan);
@@ -592,7 +593,7 @@ function projectContext(question){
   return JSON.stringify({object: P.name || "", rooms, commonItems: common, purchaseSummary: sum.map(s => ({name: s.name, qty: s.qty, unit: s.unit, price: s.price, sum: s.sum})),
     ourTotal: r2(sum.reduce((a, s) => a + s.sum, 0)),
     worksEstimate: W.lines.length ? {note: "согласованная с заказчиком смета работ", lines: W.lines.map(l => ({section: l.section, name: l.name, kind: l.kind, unit: l.unit, qty: num(l.qty), price: num(l.price), sum: lineSum(l)})), total: docSum(W)} : null,
-    act: A.lines.length ? {note: "акт выполненных работ (факт); planLine — строка сметы", lines: A.lines.map(l => ({name: l.name, unit: l.unit, qty: num(l.qty), price: num(l.price), sum: lineSum(l), planLine: W.lines.find(w => w.id === l.ref)?.name || "доп. работа"})), total: docSum(A), differenceToEstimate: r2(docSum(A) - docSum(W))} : null,
+    act: A.lines.length ? {note: "акт выполненных работ (факт); planLine — строка сметы", lines: A.lines.map(l => ({name: l.name, unit: l.unit, qty: num(l.qty), price: num(l.price), sum: lineSum(l), planLine: W.lines.find(w => w.id === l.ref)?.name || "доп. работа"})), total: docSum(A), differenceToWorksEstimate: r2(docSum(A) - docSum({lines: workLines(W)})), note2: "акт сравнивается только с работами сметы, без материалов"} : null,
     priceBase: {totalItems: DB.items.length, file: DB.file, items: db, note: DB.items.length > 400 ? "показаны только позиции, похожие на вопрос" : "вся база"}});
 }
 const CHAT_SYSTEM = `Ты — помощник прораба в программе расчёта ремонта. Отвечай по-русски, коротко и по делу, простыми словами, с цифрами.
